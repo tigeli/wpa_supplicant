@@ -13,7 +13,6 @@
 * Fri Oct 01 2010 Inaky Perez-Gonzalez <inaky.perez-gonzalez@intel.com> - 0.7.2
 - Add patch to generate the libeap0 and libeap0-devel packges; this
   does not modify the wpa_supplicant binaries at all.
-
 - Add Makefile to generate .spec from .yaml
 
 * Thu Aug 26 2010 Martin Xu <martin.xu@intel.com> - 0.7.2
@@ -40,53 +39,4 @@
 
 * Mon Jan 18 2010 Martin Xu <martin.xu@intel.com> - 0.7.1
 - upgrade to 0.7.1
-
-* Thu Oct 01 2009 Anas Nashif <anas.nashif@intel.com> - 0.6.9
-- Remove dependency on python through examples
-
-* Tue Sep 15 2009 Martin Xu <martin.xu@intel.com> 0.6.9
-- add wpa_s-drv-disassociate-on-disassoc-event.patch 
-
-* Thu Sep 11 2009 Martin Xu <martin.xu@intel.com> 0.6.9
-- add wpa_s-disconnected.patch 
-
-* Tue Sep 8 2009 Martin Xu <martin.xu@intel.com> 0.6.9
-- add wpa_s-encode_disable-0.6.9.patch
-- add wpa_s-discard-eapol.patch
-- remove other unused patches
-- clean up spec file and remove unused config file
-- remove the gui-qt package
-- clean up changfile
-- install exec file to /sbin
-
-* Wed May 27 2009 Martin Xu <martin.xu@intel.com> 0.6.9
-- Upgrade to 0.6.9
-- Add WPS support in config file
-
-* Wed Feb 18 2009 Yin Kangkai <kangkai.yin@intel.com> 0.6.8
-- Upgrade to 0.6.8
-
-* Sat Feb 14 2009 Anas Nashif <anas.nashif@intel.com> 0.6.7
-- Update to 2.6.7 and apply fixes and patches from fedora
-
-* Sat Feb 14 2009 Anas Nashif <anas.nashif@intel.com> 0.6.7
-- Apply fixes from fedora:
- - Fix scan result retrieval in very dense wifi environments
- - Ensure that drivers don't retry association when they aren't supposed to
- - Fix PEAP connections to Windows Server 2008 authenticators (rh #465022)
- - Stop supplicant on uninstall (rh #447843)
- - Suppress scan results message in logs (rh #466601)
- - Handle encryption keys correctly when switching 802.11 modes (rh #459399)
- - Better scanning behavior on resume from suspend/hibernate
- - Better interaction with newer kernels and drivers
- - Remove 'hostap', 'madwifi', and 'prism54' drivers; use standard 'wext' instead
-
-* Mon Sep 22 2008 Anas Nashif <anas.nashif@intel.com> 0.6.3
-- do not install examples
-
-* Tue Aug 12 2008 Anas Nashif <anas.nashif@intel.com>
-- Do not install gui stuff is disabled
-
-* Tue Aug 12 2008 Anas Nashif <anas.nashif@intel.com> 
-- Enable/disable gui via macro
 
