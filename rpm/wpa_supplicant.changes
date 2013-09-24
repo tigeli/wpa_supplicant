@@ -1,0 +1,92 @@
+* Mon May 14 2012 Marko Saukko <sage@merproject.org> - 1.0
+- Update wpa_supplicant to version 1.0
+
+* Tue Jan 18 2011 Martin Xu <martin.xu@intel.com> - 0.7.3
+- add patch wpa_s-alldrivers.patch to fix BMC #12576
+
+* Fri Jan 14 2011 Martin Xu <martin.xu@intel.com> - 0.7.3
+- upgrade to 0.7.3 to partly support FEA #7696
+
+* Fri Oct 08 2010 Inaky Perez-Gonzalez <inaky.perez-gonzalez@intel.com> - 0.7.2
+- Fix mis-generated patch file that does not apply correctly.
+
+* Fri Oct 01 2010 Inaky Perez-Gonzalez <inaky.perez-gonzalez@intel.com> - 0.7.2
+- Add patch to generate the libeap0 and libeap0-devel packges; this
+  does not modify the wpa_supplicant binaries at all.
+
+- Add Makefile to generate .spec from .yaml
+
+* Thu Aug 26 2010 Martin Xu <martin.xu@intel.com> - 0.7.2
+- Add patch 0002-sme-Check-for-prev_bssid-from-the-disassociation-eve.patch
+- To fix BMC #5111
+- Add patch 0001-sme-Try-all-authentication-algorithms-when-the-first.patch
+- To fix BMC #5191 
+
+* Wed Jul 21 2010 Martin Xu <martin.xu@intel.com> - 0.7.2
+- add patch 0001-Skip-D-Bus-signals-if-the-dbus_path-is-not-yet-set.patch
+- to fix wpa_s start up fail issue
+- add patch bcm-custom_event-0.7.2.patch
+- it is Broadcome driver specific patch
+
+* Mon Jul 19 2010 Martin Xu <martin.xu@intel.com> - 0.7.2
+- use spectacle
+
+* Mon Jul 19 2010 Martin Xu <martin.xu@intel.com> - 0.7.2
+- upgrade to 0.7.2
+- enable CONFIG_DRIVER_NL80211=y
+
+* Fri Mar 26 2010 Anas Nashif <anas.nashif@intel.com> - 0.7.1
+- Remove Epoch
+
+* Mon Jan 18 2010 Martin Xu <martin.xu@intel.com> - 0.7.1
+- upgrade to 0.7.1
+
+* Thu Oct 01 2009 Anas Nashif <anas.nashif@intel.com> - 0.6.9
+- Remove dependency on python through examples
+
+* Tue Sep 15 2009 Martin Xu <martin.xu@intel.com> 0.6.9
+- add wpa_s-drv-disassociate-on-disassoc-event.patch 
+
+* Thu Sep 11 2009 Martin Xu <martin.xu@intel.com> 0.6.9
+- add wpa_s-disconnected.patch 
+
+* Tue Sep 8 2009 Martin Xu <martin.xu@intel.com> 0.6.9
+- add wpa_s-encode_disable-0.6.9.patch
+- add wpa_s-discard-eapol.patch
+- remove other unused patches
+- clean up spec file and remove unused config file
+- remove the gui-qt package
+- clean up changfile
+- install exec file to /sbin
+
+* Wed May 27 2009 Martin Xu <martin.xu@intel.com> 0.6.9
+- Upgrade to 0.6.9
+- Add WPS support in config file
+
+* Wed Feb 18 2009 Yin Kangkai <kangkai.yin@intel.com> 0.6.8
+- Upgrade to 0.6.8
+
+* Sat Feb 14 2009 Anas Nashif <anas.nashif@intel.com> 0.6.7
+- Update to 2.6.7 and apply fixes and patches from fedora
+
+* Sat Feb 14 2009 Anas Nashif <anas.nashif@intel.com> 0.6.7
+- Apply fixes from fedora:
+ - Fix scan result retrieval in very dense wifi environments
+ - Ensure that drivers don't retry association when they aren't supposed to
+ - Fix PEAP connections to Windows Server 2008 authenticators (rh #465022)
+ - Stop supplicant on uninstall (rh #447843)
+ - Suppress scan results message in logs (rh #466601)
+ - Handle encryption keys correctly when switching 802.11 modes (rh #459399)
+ - Better scanning behavior on resume from suspend/hibernate
+ - Better interaction with newer kernels and drivers
+ - Remove 'hostap', 'madwifi', and 'prism54' drivers; use standard 'wext' instead
+
+* Mon Sep 22 2008 Anas Nashif <anas.nashif@intel.com> 0.6.3
+- do not install examples
+
+* Tue Aug 12 2008 Anas Nashif <anas.nashif@intel.com>
+- Do not install gui stuff is disabled
+
+* Tue Aug 12 2008 Anas Nashif <anas.nashif@intel.com> 
+- Enable/disable gui via macro
+
