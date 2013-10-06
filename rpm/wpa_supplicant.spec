@@ -142,10 +142,8 @@ fi
 
 %postun
 /bin/systemctl daemon-reload >/dev/null 2>&1 || :
-if [ $1 -ge 1 ] ; then
-# Package upgrade, not uninstall
-/bin/systemctl try-restart wpa_supplicant.service >/dev/null 2>&1 || :
-fi
+# Lets not restart wpa_supplicant on postun to make sure network connectivity is not
+# broken during update process.
 
 %post -n libeap -p /sbin/ldconfig
 
