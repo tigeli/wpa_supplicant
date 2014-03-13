@@ -1,7 +1,7 @@
 Name:       wpa_supplicant
 
 Summary:    WPA/WPA2/IEEE 802.1X Supplicant
-Version:    2.0
+Version:    2.1
 Release:    1
 Group:      System Environment/Base
 License:    GPLv2
@@ -119,6 +119,7 @@ rm -rf %{name}/doc/docbook
 chmod -R 0644 %{name}/examples/*.py
 
 # HAAACK
+rm -f src/eap_peer/libeap0.pc
 patch -p1 -b --suffix .wimax < %{SOURCE6}
 pushd wpa_supplicant
 make clean
