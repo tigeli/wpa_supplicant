@@ -1,7 +1,8 @@
 [Unit]
 Description=WPA Supplicant daemon
 Before=network.target
-After=syslog.target
+Requires=dbus.socket
+After=dbus.socket
 
 [Service]
 Type=dbus
