@@ -21,6 +21,7 @@ Patch4:     wpa_supplicant-openssl-more-algs.patch
 Patch5:     wpa_supplicant-gui-qt4.patch
 Patch6:     libnl3-includes.patch
 Patch7:     wpa_supplicant-remove-interface-call-order.patch
+Patch8:     wpa_supplicant-accept-valid-eku.patch
 BuildRequires:  pkgconfig(libnl-3.0)
 BuildRequires:  pkgconfig(dbus-1)
 BuildRequires:  pkgconfig(openssl)
@@ -76,6 +77,8 @@ unless you know what you're doing.
 %patch6 -p1
 # wpa_supplicant-remove-interface-call-order.patch
 %patch7 -p1
+# wpa_supplicant-accept-valid-eku.patch
+%patch8 -p1
 
 %build
 pushd wpa_supplicant
