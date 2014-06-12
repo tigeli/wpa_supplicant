@@ -1,0 +1,15 @@
+kkdiff --git a/src/drivers/driver_nl80211.c b/src/drivers/driver_nl80211.c
+index 7568653..9d027bb 100644
+Index: hostap/src/drivers/driver_nl80211.c
+===================================================================
+--- hostap.orig/src/drivers/driver_nl80211.c	2014-06-12 13:23:36.346269104 +0300
++++ hostap/src/drivers/driver_nl80211.c	2014-06-12 13:24:01.258268151 +0300
+@@ -3781,7 +3781,7 @@
+ 
+ 	if (tb[NL80211_ATTR_ROAM_SUPPORT]) {
+ 		wpa_printf(MSG_DEBUG, "nl80211: Using driver-based roaming");
+-		capa->flags |= WPA_DRIVER_FLAGS_BSS_SELECTION;
++/*		capa->flags |= WPA_DRIVER_FLAGS_BSS_SELECTION; */
+ 	}
+ 
+ 	wiphy_info_max_roc(capa,
