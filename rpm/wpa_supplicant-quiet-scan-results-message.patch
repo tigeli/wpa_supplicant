@@ -1,8 +1,8 @@
-diff --git a/wpa_supplicant/events.c b/wpa_supplicant/events.c
-index a72f2fa..8e35dac 100644
---- a/wpa_supplicant/events.c
-+++ b/wpa_supplicant/events.c
-@@ -1277,11 +1277,11 @@ static int _wpa_supplicant_event_scan_results(struct wpa_supplicant *wpa_s,
+Index: hostap2/wpa_supplicant/events.c
+===================================================================
+--- hostap2.orig/wpa_supplicant/events.c	2014-06-11 10:47:05.757104816 +0300
++++ hostap2/wpa_supplicant/events.c	2014-06-11 10:47:05.749104817 +0300
+@@ -1322,11 +1322,11 @@
  		wpa_s->own_scan_running, wpa_s->external_scan_running);
  	if (wpa_s->last_scan_req == MANUAL_SCAN_REQ &&
  	    wpa_s->manual_scan_use_id && wpa_s->own_scan_running) {

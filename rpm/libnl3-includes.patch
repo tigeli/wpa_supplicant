@@ -1,7 +1,8 @@
-diff -up wpa_supplicant-1.0-rc2/src/drivers/drivers.mak.foo wpa_supplicant-1.0-rc2/src/drivers/drivers.mak
---- wpa_supplicant-1.0-rc2/src/drivers/drivers.mak.foo	2012-03-02 16:11:43.176448714 -0600
-+++ wpa_supplicant-1.0-rc2/src/drivers/drivers.mak	2012-03-02 16:12:29.759866341 -0600
-@@ -48,7 +48,7 @@ NEED_RFKILL=y
+Index: hostap2/src/drivers/drivers.mak
+===================================================================
+--- hostap2.orig/src/drivers/drivers.mak	2014-06-11 10:46:37.601105893 +0300
++++ hostap2/src/drivers/drivers.mak	2014-06-11 10:46:37.597105894 +0300
+@@ -35,7 +35,7 @@
  ifdef CONFIG_LIBNL32
    DRV_LIBS += -lnl-3
    DRV_LIBS += -lnl-genl-3

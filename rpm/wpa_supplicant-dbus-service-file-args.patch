@@ -1,6 +1,7 @@
-diff -up wpa_supplicant-0.7.3/wpa_supplicant/dbus/fi.w1.wpa_supplicant1.service.in.fedora wpa_supplicant-0.7.3/wpa_supplicant/dbus/fi.w1.wpa_supplicant1.service.in
---- wpa_supplicant-0.7.3/wpa_supplicant/dbus/fi.w1.wpa_supplicant1.service.in.fedora	2008-03-02 20:58:35.000000000 -0500
-+++ wpa_supplicant-0.7.3/wpa_supplicant/dbus/fi.w1.wpa_supplicant1.service.in	2008-03-02 20:58:41.000000000 -0500
+Index: hostap2/wpa_supplicant/dbus/fi.w1.wpa_supplicant1.service.in
+===================================================================
+--- hostap2.orig/wpa_supplicant/dbus/fi.w1.wpa_supplicant1.service.in	2014-06-11 10:47:10.645104629 +0300
++++ hostap2/wpa_supplicant/dbus/fi.w1.wpa_supplicant1.service.in	2014-06-11 10:47:10.641104630 +0300
 @@ -1,5 +1,5 @@
  [D-BUS Service]
  Name=fi.w1.wpa_supplicant1
@@ -8,9 +9,10 @@ diff -up wpa_supplicant-0.7.3/wpa_supplicant/dbus/fi.w1.wpa_supplicant1.service.
 +Exec=@BINDIR@/wpa_supplicant -B -u -f /var/log/wpa_supplicant.log -c /etc/wpa_supplicant/wpa_supplicant.conf -P /var/run/wpa_supplicant.pid
  User=root
  SystemdService=wpa_supplicant.service
-diff -up wpa_supplicant-0.7.3/wpa_supplicant/dbus/fi.epitest.hostap.WPASupplicant.service.in.fedora wpa_supplicant-0.7.3/wpa_supplicant/dbus/fi.epitest.hostap.WPASupplicant.service.in
---- wpa_supplicant-0.7.3/wpa_supplicant/dbus/fi.epitest.hostap.WPASupplicant.service.in.fedora	2008-03-02 20:58:35.000000000 -0500
-+++ wpa_supplicant-0.7.3/wpa_supplicant/dbus/fi.epitest.hostap.WPASupplicant.service.in	2008-03-02 20:58:41.000000000 -0500
+Index: hostap2/wpa_supplicant/dbus/fi.epitest.hostap.WPASupplicant.service.in
+===================================================================
+--- hostap2.orig/wpa_supplicant/dbus/fi.epitest.hostap.WPASupplicant.service.in	2014-06-11 10:47:10.645104629 +0300
++++ hostap2/wpa_supplicant/dbus/fi.epitest.hostap.WPASupplicant.service.in	2014-06-11 10:47:10.641104630 +0300
 @@ -1,5 +1,5 @@
  [D-BUS Service]
  Name=fi.epitest.hostap.WPASupplicant
