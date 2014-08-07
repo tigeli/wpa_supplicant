@@ -11,7 +11,6 @@ Source1:    build-config
 Source2:    %{name}.conf
 Source3:    %{name}.service
 Source4:    %{name}.sysconfig
-Source5:    %{name}.logrotate
 Source6:    wpa_supplicant-2.0-generate-libeap-peer.patch
 Patch0:     wpa_supplicant-assoc-timeout.patch
 Patch1:     wpa_supplicant-flush-debug-output.patch
@@ -91,7 +90,6 @@ rm -rf %{buildroot}
 # init scripts
 install -D -m 0755 %{SOURCE3} %{buildroot}/%{_lib}/systemd/system/%{name}.service
 install -D -m 0644 %{SOURCE4} %{buildroot}/%{_sysconfdir}/sysconfig/%{name}
-install -D -m 0644 %{SOURCE5} %{buildroot}/%{_sysconfdir}/logrotate.d/%{name}
 
 # config
 install -D -m 0600 %{SOURCE2} %{buildroot}/%{_sysconfdir}/%{name}/%{name}.conf
@@ -140,6 +138,7 @@ if [ $1 -eq 1 ] ; then
 # Initial installation
 /bin/systemctl daemon-reload >/dev/null 2>&1 || :
 fi
+rm /var/log/wpa_supplicant.log || :
 
 %postun
 /bin/systemctl daemon-reload >/dev/null 2>&1 || :
@@ -155,7 +154,6 @@ fi
 %doc COPYING %{name}/ChangeLog README %{name}/eap_testing.txt %{name}/todo.txt %{name}/wpa_supplicant.conf %{name}/examples
 %config(noreplace) %{_sysconfdir}/%{name}/%{name}.conf
 %config(noreplace) %{_sysconfdir}/sysconfig/%{name}
-%config(noreplace) %{_sysconfdir}/logrotate.d/%{name}
 /%{_lib}/systemd/system/%{name}.service
 %{_sysconfdir}/dbus-1/system.d/%{name}.conf
 %{_datadir}/dbus-1/system-services/fi.epitest.hostap.WPASupplicant.service
