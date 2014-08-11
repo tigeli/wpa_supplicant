@@ -1,3 +1,7 @@
+* Tue Aug 12 2014 Pasi Sjöholm <pasi.sjoholm@jollamobile.com> - 2.2-2
+- Always get RSN IE from the scan results
+- Don't log to file anymore so logs end up in the normal journal. 
+
 * Wed Jun 11 2014 Pasi Sjöholm <pasi.sjoholm@jollamobile.com> - 2.2
 - Update wpa_supplicant to version 2.2
 
