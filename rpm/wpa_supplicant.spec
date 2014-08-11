@@ -19,6 +19,7 @@ Patch3:     wpa_supplicant-quiet-scan-results-message.patch
 Patch4:     wpa_supplicant-openssl-more-algs.patch
 Patch5:     wpa_supplicant-gui-qt4.patch
 Patch6:     libnl3-includes.patch
+Patch7:     wpa_supplicant-always-get-rsn-ie-from-scan-results.patch
 BuildRequires:  pkgconfig(libnl-3.0)
 BuildRequires:  pkgconfig(dbus-1)
 BuildRequires:  pkgconfig(openssl)
@@ -72,6 +73,8 @@ unless you know what you're doing.
 %patch5 -p1
 # libnl3-includes.patch
 %patch6 -p1
+# wpa_supplicant-always-get-rsn-ie-from-scan-results.patch
+%patch7 -p1
 
 %build
 pushd wpa_supplicant
