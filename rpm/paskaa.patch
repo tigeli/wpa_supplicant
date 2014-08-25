@@ -1,0 +1,12 @@
+--- wpa_supplicant/ctrl_iface_unix.c.old	2014-08-26 00:31:51.254110191 +0300
++++ wpa_supplicant/ctrl_iface_unix.c	2014-08-26 00:00:03.330030123 +0300
+@@ -653,6 +653,9 @@
+ 	struct msghdr msg;
+ 	struct iovec io[5];
+ 
++	if (wpa_s == NULL)
++		return;
++
+ 	if (sock < 0 || dl_list_empty(ctrl_dst))
+ 		return;
+
