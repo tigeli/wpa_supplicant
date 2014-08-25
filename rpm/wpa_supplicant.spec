@@ -24,6 +24,12 @@ BuildRequires:  pkgconfig(libnl-3.0)
 BuildRequires:  pkgconfig(dbus-1)
 BuildRequires:  pkgconfig(openssl)
 BuildRequires:  readline-devel
+# Required for systemctl
+Requires(post): systemd
+Requires(preun): systemd
+Requires(postun): systemd
+# Required for rm
+Requires(post): coreutils
 
 %description
 wpa_supplicant is a WPA Supplicant for Linux, BSD and Windows with support
