@@ -9,6 +9,7 @@ Type=dbus
 BusName=fi.w1.wpa_supplicant1
 EnvironmentFile=-/etc/sysconfig/wpa_supplicant
 ExecStart=/usr/sbin/wpa_supplicant -u -c /etc/wpa_supplicant/wpa_supplicant.conf -O/var/run/wpa_supplicant $INTERFACES $DRIVERS $OTHER_ARGS
+Restart=on-failure
 
 [Install]
 WantedBy=multi-user.target
