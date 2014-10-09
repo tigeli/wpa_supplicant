@@ -1,3 +1,12 @@
+* Fri Oct 10 2014 Pasi Sjöholm <pasi.sjoholm@jollamobile.com> - 2.2-5
+- Fix CVE-2014-3686
+
+* Tue Sep 23 2014 Hannu Mallat <hmallat@gmail.com> - 2.2-4
+- [systemd] Restart wpa_supplicant.service on failure
+
+* Mon Aug 25 2014 Marko Saukko <marko.saukko@gmail.com> - 2.2-3
+- [packaging] Fix install time dependencies to coreutils and systemd.
+
 * Tue Aug 12 2014 Pasi Sjöholm <pasi.sjoholm@jollamobile.com> - 2.2-2
 - Always get RSN IE from the scan results
 - Don't log to file anymore so logs end up in the normal journal. 
