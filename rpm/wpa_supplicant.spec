@@ -22,7 +22,6 @@ Patch6:     libnl3-includes.patch
 Patch7:     wpa_supplicant-always-get-rsn-ie-from-scan-results.patch
 Patch8:     0001-Add-os_exec-helper-to-run-external-programs.patch
 Patch9:     0002-wpa_cli-Use-os_exec-for-action-script-execution.patch
-Patch10:    0003-hostapd_cli-Use-os_exec-for-action-script-execution.patch
 BuildRequires:  pkgconfig(libnl-3.0)
 BuildRequires:  pkgconfig(dbus-1)
 BuildRequires:  pkgconfig(openssl)
@@ -88,8 +87,6 @@ unless you know what you're doing.
 %patch8 -p1
 # 0002-wpa_cli-Use-os_exec-for-action-script-execution.patch
 %patch9 -p1
-# 0003-hostapd_cli-Use-os_exec-for-action-script-execution.patch
-%patch10 -p1
 
 %build
 pushd wpa_supplicant
