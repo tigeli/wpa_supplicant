@@ -1885,10 +1885,10 @@ static void wpas_start_assoc_cb(struct wpa_radio_work *work, int deinit)
 
 		if (assoc_failed) {
 			/* give IBSS a bit more time */
-			timeout = ssid->mode == WPAS_MODE_IBSS ? 10 : 5;
+			timeout = ssid->mode == WPAS_MODE_IBSS ? 20 : 10;
 		} else if (wpa_s->conf->ap_scan == 1) {
 			/* give IBSS a bit more time */
-			timeout = ssid->mode == WPAS_MODE_IBSS ? 20 : 10;
+			timeout = ssid->mode == WPAS_MODE_IBSS ? 20 : 20;
 		}
 		wpa_supplicant_req_auth_timeout(wpa_s, timeout, 0);
 	}
