@@ -960,20 +960,19 @@ static int wpa_supplicant_validate_ie(struct wpa_sm *sm,
 				      const unsigned char *src_addr,
 				      struct wpa_eapol_ie_parse *ie)
 {
-	if (sm->ap_wpa_ie == NULL && sm->ap_rsn_ie == NULL) {
-		wpa_dbg(sm->ctx->msg_ctx, MSG_DEBUG,
-			"WPA: No WPA/RSN IE for this AP known. "
-			"Trying to get from scan results");
-		if (wpa_sm_get_beacon_ie(sm) < 0) {
-			wpa_msg(sm->ctx->msg_ctx, MSG_WARNING,
-				"WPA: Could not find AP from "
-				"the scan results");
-		} else {
-			wpa_msg(sm->ctx->msg_ctx, MSG_DEBUG,
-				"WPA: Found the current AP from "
-				"updated scan results");
-		}
+	wpa_dbg(sm->ctx->msg_ctx, MSG_DEBUG,
+		"WPA: Get WPA/RSN IE for this AP "
+		"from the scan results");
+	if (wpa_sm_get_beacon_ie(sm) < 0) {
+		wpa_msg(sm->ctx->msg_ctx, MSG_WARNING,
+			"WPA: Could not find AP from "
+			"the scan results");
+	} else {
+		wpa_msg(sm->ctx->msg_ctx, MSG_DEBUG,
+			"WPA: Found the current AP from "
+			"updated scan results");
 	}
+
 
 	if (ie->wpa_ie == NULL && ie->rsn_ie == NULL &&
 	    (sm->ap_wpa_ie || sm->ap_rsn_ie)) {
