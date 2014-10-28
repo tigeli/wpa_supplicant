@@ -13,7 +13,6 @@ Source3:    %{name}.service
 Source4:    %{name}.sysconfig
 Source6:    wpa_supplicant-2.0-generate-libeap-peer.patch
 Patch0:     wpa_supplicant-assoc-timeout.patch
-Patch1:     wpa_supplicant-flush-debug-output.patch
 BuildRequires:  pkgconfig(libnl-3.0)
 BuildRequires:  pkgconfig(dbus-1)
 BuildRequires:  pkgconfig(openssl)
@@ -61,8 +60,6 @@ unless you know what you're doing.
 
 # wpa_supplicant-assoc-timeout.patch
 %patch0 -p1
-# wpa_supplicant-flush-debug-output.patch
-%patch1 -p1
 
 %build
 pushd wpa_supplicant
