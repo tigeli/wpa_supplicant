@@ -765,6 +765,11 @@ void * tls_init(const struct tls_config *conf)
 #endif /* OPENSSL_FIPS */
 #endif /* CONFIG_FIPS */
 		SSL_load_error_strings();
+		/* Only add potentially weak hashes and encryption algorithms
+		 * when FIPS mode is not enabled.
+		 */
+		if (!conf || !conf->fips_mode)
+			OpenSSL_add_all_algorithms();
 		SSL_library_init();
 #if (OPENSSL_VERSION_NUMBER >= 0x0090800fL) && !defined(OPENSSL_NO_SHA256)
 		EVP_add_digest(EVP_sha256());
