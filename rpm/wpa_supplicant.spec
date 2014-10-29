@@ -12,17 +12,6 @@ Source2:    %{name}.conf
 Source3:    %{name}.service
 Source4:    %{name}.sysconfig
 Source6:    wpa_supplicant-2.0-generate-libeap-peer.patch
-Patch0:     wpa_supplicant-assoc-timeout.patch
-Patch1:     wpa_supplicant-flush-debug-output.patch
-Patch2:     wpa_supplicant-dbus-service-file-args.patch
-Patch3:     wpa_supplicant-quiet-scan-results-message.patch
-Patch4:     wpa_supplicant-openssl-more-algs.patch
-Patch5:     wpa_supplicant-gui-qt4.patch
-Patch6:     libnl3-includes.patch
-Patch7:     wpa_supplicant-always-get-rsn-ie-from-scan-results.patch
-Patch8:     0001-Add-os_exec-helper-to-run-external-programs.patch
-Patch9:     0002-wpa_cli-Use-os_exec-for-action-script-execution.patch
-Patch10:    0003-hostapd_cli-Use-os_exec-for-action-script-execution.patch
 BuildRequires:  pkgconfig(libnl-3.0)
 BuildRequires:  pkgconfig(dbus-1)
 BuildRequires:  pkgconfig(openssl)
@@ -64,32 +53,8 @@ Requires(postun): /sbin/ldconfig
 This package contains the runtime EAP peer library. Don't use this
 unless you know what you're doing.
 
-
 %prep
 %setup -q -n %{name}-%{version}/hostap
-
-# wpa_supplicant-assoc-timeout.patch
-%patch0 -p1
-# wpa_supplicant-flush-debug-output.patch
-%patch1 -p1
-# wpa_supplicant-dbus-service-file-args.patch
-%patch2 -p1
-# wpa_supplicant-quiet-scan-results-message.patch
-%patch3 -p1
-# wpa_supplicant-openssl-more-algs.patch
-%patch4 -p1
-# wpa_supplicant-gui-qt4.patch
-%patch5 -p1
-# libnl3-includes.patch
-%patch6 -p1
-# wpa_supplicant-always-get-rsn-ie-from-scan-results.patch
-%patch7 -p1
-# 0001-Add-os_exec-helper-to-run-external-programs.patch
-%patch8 -p1
-# 0002-wpa_cli-Use-os_exec-for-action-script-execution.patch
-%patch9 -p1
-# 0003-hostapd_cli-Use-os_exec-for-action-script-execution.patch
-%patch10 -p1
 
 %build
 pushd wpa_supplicant
