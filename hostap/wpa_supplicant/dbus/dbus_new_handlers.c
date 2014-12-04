@@ -1438,11 +1438,9 @@ DBusMessage * wpas_dbus_handler_signal_poll(DBusMessage *message,
 	if (!wpa_dbus_dict_append_uint32(&iter_dict, "frequency", si.frequency))
 		goto nomem;
 
-	if (si.chanwidth != CHAN_WIDTH_UNKNOWN) {
-		if (!wpa_dbus_dict_append_string(&iter_dict, "width",
-					channel_width_to_string(si.chanwidth)))
-			goto nomem;
-	}
+	if (!wpa_dbus_dict_append_string(&iter_dict, "width",
+				channel_width_to_string(si.chanwidth)))
+		goto nomem;
 
 	if (si.center_frq1 > 0 && si.center_frq2 > 0) {
 		if (!wpa_dbus_dict_append_int32(&iter_dict, "center-frq1",
