@@ -86,9 +86,6 @@ install -D -m 0644 %{name}/dbus/dbus-wpa_supplicant.conf %{buildroot}/%{_sysconf
 install -D -m 0644 %{name}/dbus/fi.w1.wpa_supplicant1.service %{buildroot}/%{_datadir}/dbus-1/system-services/fi.w1.wpa_supplicant1.service
 install -D -m 0644 %{name}/dbus/fi.epitest.hostap.WPASupplicant.service %{buildroot}/%{_datadir}/dbus-1/system-services/fi.epitest.hostap.WPASupplicant.service
 
-# running
-mkdir -p %{buildroot}/%{_localstatedir}/run/%{name}
-
 # man pages
 #install -d %{buildroot}%{_mandir}/man{5,8}
 #install -m 0644 %{name}/doc/docbook/*.8 %{buildroot}%{_mandir}/man8
@@ -144,7 +141,6 @@ rm /var/log/wpa_supplicant.log || :
 %{_sbindir}/wpa_passphrase
 %{_sbindir}/wpa_supplicant
 %{_sbindir}/wpa_cli
-%dir %{_localstatedir}/run/%{name}
 %dir %{_sysconfdir}/%{name}
 #%doc %{_mandir}/man8/*
 #%doc %{_mandir}/man5/*
