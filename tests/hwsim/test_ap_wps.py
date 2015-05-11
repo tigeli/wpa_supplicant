@@ -915,7 +915,12 @@ def test_ap_wps_er_add_enrollee(dev, apdev):
     dev[1].scan(freq="2412")
     bss = dev[1].get_bss(apdev[0]['bssid'])
     if "[WPS-AUTH]" not in bss['flags']:
-        raise Exception("WPS-AUTH flag missing")
+        # It is possible for scan to miss an update especially when running
+        # tests under load with multiple VMs, so allow another attempt.
+        dev[1].scan(freq="2412")
+        bss = dev[1].get_bss(apdev[0]['bssid'])
+        if "[WPS-AUTH]" not in bss['flags']:
+            raise Exception("WPS-AUTH flag missing")
 
     logger.info("Stop ER")
     dev[0].dump_monitor()
@@ -2102,3 +2107,77 @@ def test_ap_wps_disabled(dev, apdev):
         raise Exception("WPS_PBC succeeded unexpectedly")
     if "FAIL" not in hapd.request("WPS_CANCEL"):
         raise Exception("WPS_CANCEL succeeded unexpectedly")
+
+def test_ap_wps_mixed_cred(dev, apdev):
+    """WPS 2.0 STA merging mixed mode WPA/WPA2 credentials"""
+    ssid = "test-wps-wep"
+    hostapd.add_ap(apdev[0]['ifname'],
+                   { "ssid": ssid, "eap_server": "1", "wps_state": "2",
+                     "skip_cred_build": "1", "extra_cred": "wps-mixed-cred" })
+    hapd = hostapd.Hostapd(apdev[0]['ifname'])
+    hapd.request("WPS_PBC")
+    dev[0].request("WPS_PBC")
+    ev = dev[0].wait_event(["WPS-SUCCESS"], timeout=15)
+    if ev is None:
+        raise Exception("WPS-SUCCESS event timed out")
+    nets = dev[0].list_networks()
+    if len(nets) != 1:
+        raise Exception("Unexpected number of network blocks")
+    id = nets[0]['id']
+    proto = dev[0].get_network(id, "proto")
+    if proto != "WPA RSN":
+        raise Exception("Unexpected merged proto field value: " + proto)
+    pairwise = dev[0].get_network(id, "pairwise")
+    if pairwise != "CCMP TKIP":
+        raise Exception("Unexpected merged pairwise field value: " + pairwise)
+
+def test_ap_wps_while_connected(dev, apdev):
+    """WPS PBC provisioning while connected to another AP"""
+    ssid = "test-wps-conf"
+    hostapd.add_ap(apdev[0]['ifname'],
+                   { "ssid": ssid, "eap_server": "1", "wps_state": "2",
+                     "wpa_passphrase": "12345678", "wpa": "2",
+                     "wpa_key_mgmt": "WPA-PSK", "rsn_pairwise": "CCMP"})
+    hapd = hostapd.Hostapd(apdev[0]['ifname'])
+
+    hostapd.add_ap(apdev[1]['ifname'], { "ssid": "open" })
+    dev[0].connect("open", key_mgmt="NONE", scan_freq="2412")
+
+    logger.info("WPS provisioning step")
+    hapd.request("WPS_PBC")
+    dev[0].dump_monitor()
+    dev[0].request("WPS_PBC")
+    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
+    if ev is None:
+        raise Exception("Association with the AP timed out")
+    status = dev[0].get_status()
+    if status['bssid'] != apdev[0]['bssid']:
+        raise Exception("Unexpected BSSID")
+
+def test_ap_wps_while_connected_no_autoconnect(dev, apdev):
+    """WPS PBC provisioning while connected to another AP and STA_AUTOCONNECT disabled"""
+    ssid = "test-wps-conf"
+    hostapd.add_ap(apdev[0]['ifname'],
+                   { "ssid": ssid, "eap_server": "1", "wps_state": "2",
+                     "wpa_passphrase": "12345678", "wpa": "2",
+                     "wpa_key_mgmt": "WPA-PSK", "rsn_pairwise": "CCMP"})
+    hapd = hostapd.Hostapd(apdev[0]['ifname'])
+
+    hostapd.add_ap(apdev[1]['ifname'], { "ssid": "open" })
+
+    try:
+        dev[0].request("STA_AUTOCONNECT 0")
+        dev[0].connect("open", key_mgmt="NONE", scan_freq="2412")
+
+        logger.info("WPS provisioning step")
+        hapd.request("WPS_PBC")
+        dev[0].dump_monitor()
+        dev[0].request("WPS_PBC")
+        ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
+        if ev is None:
+            raise Exception("Association with the AP timed out")
+        status = dev[0].get_status()
+        if status['bssid'] != apdev[0]['bssid']:
+            raise Exception("Unexpected BSSID")
+    finally:
+        dev[0].request("STA_AUTOCONNECT 1")

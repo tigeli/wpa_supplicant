@@ -10,9 +10,13 @@ import os
 import subprocess
 import time
 
+import hostapd
+import hwsim_utils
 from test_p2p_grpform import go_neg_pin_authorized
 from test_p2p_grpform import check_grpform_results
 from test_p2p_grpform import remove_group
+from test_p2p_grpform import go_neg_pbc
+from test_p2p_autogo import autogo
 
 def set_country(country):
     subprocess.call(['sudo', 'iw', 'reg', 'set', country])
@@ -178,3 +182,292 @@ def test_p2p_channel_avoid(dev):
     finally:
         set_country("00")
         dev[0].request("DRIVER_EVENT AVOID_FREQUENCIES")
+
+def test_autogo_following_bss(dev, apdev):
+    """P2P autonomous GO operate on the same channel as station interface"""
+    if dev[0].get_mcc() > 1:
+        logger.info("test mode: MCC")
+
+    dev[0].request("SET p2p_no_group_iface 0")
+
+    channels = { 3 : "2422", 5 : "2432", 9 : "2452" }
+    for key in channels:
+        hostapd.add_ap(apdev[0]['ifname'], { "ssid" : 'ap-test',
+                                             "channel" : str(key) })
+        dev[0].connect("ap-test", key_mgmt="NONE",
+                       scan_freq=str(channels[key]))
+        res_go = autogo(dev[0])
+        if res_go['freq'] != channels[key]:
+            raise Exception("Group operation channel is not the same as on connected station interface")
+        hwsim_utils.test_connectivity(dev[0].ifname, apdev[0]['ifname'])
+        dev[0].remove_group(res_go['ifname'])
+
+def test_go_neg_with_bss_connected(dev, apdev):
+    """P2P channel selection: GO negotiation when station interface is connected"""
+
+    dev[0].request("SET p2p_no_group_iface 0")
+
+    hostapd.add_ap(apdev[0]['ifname'], { "ssid": 'bss-2.4ghz', "channel": '5' })
+    dev[0].connect("bss-2.4ghz", key_mgmt="NONE", scan_freq="2432")
+    #dev[0] as GO
+    [i_res, r_res] = go_neg_pbc(i_dev=dev[0], i_intent=10, r_dev=dev[1],
+                                r_intent=1)
+    check_grpform_results(i_res, r_res)
+    if i_res['role'] != "GO":
+       raise Exception("GO not selected according to go_intent")
+    if i_res['freq'] != "2432":
+       raise Exception("Group formed on a different frequency than BSS")
+    hwsim_utils.test_connectivity(dev[0].ifname, apdev[0]['ifname'])
+    dev[0].remove_group(i_res['ifname'])
+
+    if dev[0].get_mcc() > 1:
+        logger.info("Skip as-client case due to MCC being enabled")
+        return;
+
+    #dev[0] as client
+    [i_res2, r_res2] = go_neg_pbc(i_dev=dev[0], i_intent=1, r_dev=dev[1],
+                                  r_intent=10)
+    check_grpform_results(i_res2, r_res2)
+    if i_res2['role'] != "client":
+       raise Exception("GO not selected according to go_intent")
+    if i_res2['freq'] != "2432":
+       raise Exception("Group formed on a different frequency than BSS")
+    hwsim_utils.test_connectivity(dev[0].ifname, apdev[0]['ifname'])
+
+def test_autogo_with_bss_on_disallowed_chan(dev, apdev):
+    """P2P channel selection: Autonomous GO with BSS on a disallowed channel"""
+
+    dev[0].request("SET p2p_no_group_iface 0")
+
+    if dev[0].get_mcc() < 2:
+       logger.info("Skipping test because driver does not support MCC")
+       return "skip"
+    try:
+        hostapd.add_ap(apdev[0]['ifname'], { "ssid": 'bss-2.4ghz',
+                                             "channel": '1' })
+        dev[0].request("P2P_SET disallow_freq 2412")
+        dev[0].connect("bss-2.4ghz", key_mgmt="NONE", scan_freq="2412")
+        res = autogo(dev[0])
+        if res['freq'] == "2412":
+           raise Exception("GO set on a disallowed channel")
+        hwsim_utils.test_connectivity(dev[0].ifname, apdev[0]['ifname'])
+    finally:
+        dev[0].request("P2P_SET disallow_freq ")
+
+def test_go_neg_with_bss_on_disallowed_chan(dev, apdev):
+    """P2P channel selection: GO negotiation with station interface on a disallowed channel"""
+
+    dev[0].request("SET p2p_no_group_iface 0")
+
+    if dev[0].get_mcc() < 2:
+       logger.info("Skipping test because driver does not support MCC")
+       return "skip"
+    try:
+        hostapd.add_ap(apdev[0]['ifname'], { "ssid": 'bss-2.4ghz', "channel": '1' })
+        dev[0].connect("bss-2.4ghz", key_mgmt="NONE", scan_freq="2412")
+        dev[0].request("P2P_SET disallow_freq 2412")
+
+        #dev[0] as GO
+        [i_res, r_res] = go_neg_pbc(i_dev=dev[0], i_intent=10, r_dev=dev[1],
+                                    r_intent=1)
+        check_grpform_results(i_res, r_res)
+        if i_res['role'] != "GO":
+           raise Exception("GO not selected according to go_intent")
+        if i_res['freq'] == "2412":
+           raise Exception("Group formed on a disallowed channel")
+        hwsim_utils.test_connectivity(dev[0].ifname, apdev[0]['ifname'])
+        dev[0].remove_group(i_res['ifname'])
+
+        #dev[0] as client
+        [i_res2, r_res2] = go_neg_pbc(i_dev=dev[0], i_intent=1, r_dev=dev[1],
+                                      r_intent=10)
+        check_grpform_results(i_res2, r_res2)
+        if i_res2['role'] != "client":
+           raise Exception("GO not selected according to go_intent")
+        if i_res2['freq'] == "2412":
+           raise Exception("Group formed on a disallowed channel")
+        hwsim_utils.test_connectivity(dev[0].ifname, apdev[0]['ifname'])
+    finally:
+        dev[0].request("P2P_SET disallow_freq ")
+
+def test_autogo_force_diff_channel(dev, apdev):
+    """P2P autonomous GO and station interface operate on different channels"""
+    if dev[0].get_mcc() < 2:
+        logger.info("Skiping test because the driver doesn't support MCC")
+        return "skip"
+
+    dev[0].request("SET p2p_no_group_iface 0")
+
+    hostapd.add_ap(apdev[0]['ifname'], {"ssid" : 'ap-test', "channel" : '1'})
+    dev[0].connect("ap-test", key_mgmt = "NONE", scan_freq = "2412")
+    channels = { 2 : 2417, 5 : 2432, 9 : 2452 }
+    for key in channels:
+        res_go = autogo(dev[0], channels[key])
+        hwsim_utils.test_connectivity(dev[0].ifname, apdev[0]['ifname'])
+        if int(res_go['freq']) == 2412:
+            raise Exception("Group operation channel is: 2412 excepted: " + res_go['freq'])
+        dev[0].remove_group(res_go['ifname'])
+
+def test_go_neg_forced_freq_diff_than_bss_freq(dev, apdev):
+    """P2P channel selection: GO negotiation with forced freq different than station interface"""
+    if dev[0].get_mcc() < 2:
+       logger.info("Skipping test because driver does not support MCC")
+       return "skip"
+
+    dev[0].request("SET p2p_no_group_iface 0")
+
+    hostapd.add_ap(apdev[0]['ifname'], { "country_code": 'US',
+                                         "ssid": 'bss-5ghz', "hw_mode": 'a',
+                                         "channel": '40' })
+    dev[0].connect("bss-5ghz", key_mgmt="NONE", scan_freq="5200")
+
+    # GO and peer force the same freq, different than BSS freq,
+    # dev[0] to become GO
+    [i_res, r_res] = go_neg_pbc(i_dev=dev[1], i_intent=1, i_freq=5180,
+                                r_dev=dev[0], r_intent=14, r_freq=5180)
+    check_grpform_results(i_res, r_res)
+    if i_res['freq'] != "5180":
+       raise Exception("P2P group formed on unexpected frequency: " + i_res['freq'])
+    if r_res['role'] != "GO":
+       raise Exception("GO not selected according to go_intent")
+    hwsim_utils.test_connectivity(dev[0].ifname, apdev[0]['ifname'])
+    dev[0].remove_group(r_res['ifname'])
+
+    # GO and peer force the same freq, different than BSS freq, dev[0] to
+    # become client
+    [i_res2, r_res2] = go_neg_pbc(i_dev=dev[1], i_intent=14, i_freq=2422,
+                                  r_dev=dev[0], r_intent=1, r_freq=2422)
+    check_grpform_results(i_res2, r_res2)
+    if i_res2['freq'] != "2422":
+       raise Exception("P2P group formed on unexpected frequency: " + i_res2['freq'])
+    if r_res2['role'] != "client":
+       raise Exception("GO not selected according to go_intent")
+    hwsim_utils.test_connectivity(dev[0].ifname, apdev[0]['ifname'])
+
+def test_go_pref_chan_bss_on_diff_chan(dev, apdev):
+    """P2P channel selection: Station on different channel than GO configured pref channel"""
+
+    dev[0].request("SET p2p_no_group_iface 0")
+
+    try:
+        hostapd.add_ap(apdev[0]['ifname'], { "ssid": 'bss-2.4ghz',
+                                             "channel": '1' })
+        dev[0].request("SET p2p_pref_chan 81:2")
+        dev[0].connect("bss-2.4ghz", key_mgmt="NONE", scan_freq="2412")
+        res = autogo(dev[0])
+        if res['freq'] != "2412":
+           raise Exception("GO channel did not follow BSS")
+        hwsim_utils.test_connectivity(dev[0].ifname, apdev[0]['ifname'])
+    finally:
+        dev[0].request("SET p2p_pref_chan ")
+
+def test_go_pref_chan_bss_on_disallowed_chan(dev, apdev):
+    """P2P channel selection: Station interface on different channel than GO configured pref channel, and station channel is disallowed"""
+    if dev[0].get_mcc() < 2:
+       logger.info("Skipping test because driver does not support MCC")
+       return "skip"
+
+    dev[0].request("SET p2p_no_group_iface 0")
+
+    try:
+        hostapd.add_ap(apdev[0]['ifname'], { "ssid": 'bss-2.4ghz',
+                                             "channel": '1' })
+        dev[0].request("P2P_SET disallow_freq 2412")
+        dev[0].request("SET p2p_pref_chan 81:2")
+        dev[0].connect("bss-2.4ghz", key_mgmt="NONE", scan_freq="2412")
+        res2 = autogo(dev[0])
+        if res2['freq'] != "2417":
+           raise Exception("GO channel did not follow pref_chan configuration")
+        hwsim_utils.test_connectivity(dev[0].ifname, apdev[0]['ifname'])
+    finally:
+        dev[0].request("P2P_SET disallow_freq ")
+        dev[0].request("SET p2p_pref_chan ")
+
+def test_no_go_freq(dev, apdev):
+    """P2P channel selection: no GO freq"""
+    try:
+       dev[0].request("SET p2p_no_go_freq 2412")
+       # dev[0] as client, channel 1 is ok
+       [i_res, r_res] = go_neg_pbc(i_dev=dev[0], i_intent=1,
+                                   r_dev=dev[1], r_intent=14, r_freq=2412)
+       check_grpform_results(i_res, r_res)
+       if i_res['freq'] != "2412":
+          raise Exception("P2P group not formed on forced freq")
+
+       dev[1].remove_group(r_res['ifname'])
+       fail = False
+       # dev[0] as GO, channel 1 is not allowed
+       try:
+          dev[0].request("SET p2p_no_go_freq 2412")
+          [i_res2, r_res2] = go_neg_pbc(i_dev=dev[0], i_intent=14,
+                                        r_dev=dev[1], r_intent=1, r_freq=2412)
+          check_grpform_results(i_res2, r_res2)
+          fail = True
+       except:
+           pass
+       if fail:
+           raise Exception("GO set on a disallowed freq")
+    finally:
+       dev[0].request("SET p2p_no_go_freq ")
+
+def test_go_neg_peers_force_diff_freq(dev, apdev):
+    try:
+       [i_res2, r_res2] = go_neg_pbc(i_dev=dev[0], i_intent=14, i_freq=5180,
+                                     r_dev=dev[1], r_intent=0, r_freq=5200)
+    except Exception, e:
+        return
+    raise Exception("Unexpected group formation success")
+
+def test_autogo_random_channel(dev, apdev):
+    """P2P channel selection: GO instantiated on random channel 1, 6, 11"""
+    freqs = []
+    go_freqs = ["2412", "2437", "2462"]
+    for i in range(0, 20):
+        result = autogo(dev[0])
+        if result['freq'] not in go_freqs:
+           raise Exception("Unexpected frequency selected: " + result['freq'])
+        if result['freq'] not in freqs:
+            freqs.append(result['freq'])
+        if len(freqs) == 3:
+            break
+        dev[0].remove_group(result['ifname'])
+    if i == 20:
+       raise Exception("GO created 20 times and not all social channels were selected. freqs not selected: " + str(list(set(go_freqs) - set(freqs))))
+
+def test_p2p_autogo_pref_chan_disallowed(dev, apdev):
+    """P2P channel selection: GO preferred channels are disallowed"""
+    try:
+       dev[0].request("SET p2p_pref_chan 81:1,81:3,81:6,81:9,81:11")
+       dev[0].request("P2P_SET disallow_freq 2412,2422,2437,2452,2462")
+       for i in range(0, 5):
+           res = autogo(dev[0])
+           if res['freq'] in [ "2412", "2422", "2437", "2452", "2462" ]:
+               raise Exception("GO channel is disallowed")
+           dev[0].remove_group(res['ifname'])
+    finally:
+       dev[0].request("P2P_SET disallow_freq ")
+       dev[0].request("SET p2p_pref_chan ")
+
+def test_p2p_autogo_pref_chan_not_in_regulatory(dev, apdev):
+    """P2P channel selection: GO preferred channel not allowed in the regulatory rules"""
+    try:
+        set_country("US")
+        dev[0].request("SET p2p_pref_chan 124:149")
+        res = autogo(dev[0], persistent=True)
+        if res['freq'] != "5745":
+            raise Exception("Unexpected channel selected: " + res['freq'])
+        dev[0].remove_group(res['ifname'])
+
+        netw = dev[0].list_networks()
+        if len(netw) != 1:
+            raise Exception("Unexpected number of network blocks: " + str(netw))
+        id = netw[0]['id']
+
+        set_country("DE")
+        res = autogo(dev[0], persistent=id)
+        if res['freq'] == "5745":
+            raise Exception("Unexpected channel selected(2): " + res['freq'])
+        dev[0].remove_group(res['ifname'])
+    finally:
+        dev[0].request("SET p2p_pref_chan ")
+        set_country("00")

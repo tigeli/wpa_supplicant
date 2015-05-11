@@ -125,6 +125,35 @@ def test_ap_wpa2_eap_sim(dev, apdev):
                 password="ffdca4eda45b53cf0f12d7c9c3bc6a89:cb9cccc4b9258e6dca4760379fb82581",
                 expect_failure=True)
 
+    logger.info("Invalid GSM-Milenage key")
+    dev[0].request("REMOVE_NETWORK all")
+    eap_connect(dev[0], apdev[0], "SIM", "1232010000000000",
+                password="ffdca4eda45b53cf0f12d7c9c3bc6a",
+                expect_failure=True)
+
+    logger.info("Invalid GSM-Milenage key(2)")
+    dev[0].request("REMOVE_NETWORK all")
+    eap_connect(dev[0], apdev[0], "SIM", "1232010000000000",
+                password="ffdca4eda45b53cf0f12d7c9c3bc6a8q:cb9cccc4b9258e6dca4760379fb82581",
+                expect_failure=True)
+
+    logger.info("Invalid GSM-Milenage key(3)")
+    dev[0].request("REMOVE_NETWORK all")
+    eap_connect(dev[0], apdev[0], "SIM", "1232010000000000",
+                password="ffdca4eda45b53cf0f12d7c9c3bc6a89:cb9cccc4b9258e6dca4760379fb8258q",
+                expect_failure=True)
+
+    logger.info("Invalid GSM-Milenage key(4)")
+    dev[0].request("REMOVE_NETWORK all")
+    eap_connect(dev[0], apdev[0], "SIM", "1232010000000000",
+                password="ffdca4eda45b53cf0f12d7c9c3bc6a89qcb9cccc4b9258e6dca4760379fb82581",
+                expect_failure=True)
+
+    logger.info("Missing key configuration")
+    dev[0].request("REMOVE_NETWORK all")
+    eap_connect(dev[0], apdev[0], "SIM", "1232010000000000",
+                expect_failure=True)
+
 def test_ap_wpa2_eap_sim_sql(dev, apdev, params):
     """WPA2-Enterprise connection using EAP-SIM (SQL)"""
     if not os.path.exists("/tmp/hlr_auc_gw.sock"):
@@ -216,6 +245,133 @@ def test_ap_wpa2_eap_sim_config(dev, apdev):
                 password="90dca4eda45b53cf0f12d7c9c3bc6a89:cb9cccc4b9258e6dca4760379fb82581",
                 anonymous_identity="345678")
 
+def test_ap_wpa2_eap_sim_ext(dev, apdev):
+    """WPA2-Enterprise connection using EAP-SIM and external GSM auth"""
+    if not os.path.exists("/tmp/hlr_auc_gw.sock"):
+        logger.info("No hlr_auc_gw available");
+        return "skip"
+    params = hostapd.wpa2_eap_params(ssid="test-wpa2-eap")
+    hostapd.add_ap(apdev[0]['ifname'], params)
+    dev[0].request("SET external_sim 1")
+    id = dev[0].connect("test-wpa2-eap", eap="SIM", key_mgmt="WPA-EAP",
+                        identity="1232010000000000",
+                        wait_connect=False, scan_freq="2412")
+    ev = dev[0].wait_event(["CTRL-EVENT-EAP-METHOD"], timeout=15)
+    if ev is None:
+        raise Exception("Network connected timed out")
+
+    ev = dev[0].wait_event(["CTRL-REQ-SIM"], timeout=15)
+    if ev is None:
+        raise Exception("Wait for external SIM processing request timed out")
+    p = ev.split(':', 2)
+    if p[1] != "GSM-AUTH":
+        raise Exception("Unexpected CTRL-REQ-SIM type")
+    rid = p[0].split('-')[3]
+
+    # IK:CK:RES
+    resp = "00112233445566778899aabbccddeeff:00112233445566778899aabbccddeeff:0011223344"
+    # This will fail during processing, but the ctrl_iface command succeeds
+    dev[0].request("CTRL-RSP-SIM-" + rid + ":UMTS-AUTH:" + resp)
+    ev = dev[0].wait_event(["CTRL-EVENT-EAP-FAILURE"], timeout=15)
+    if ev is None:
+        raise Exception("EAP failure not reported")
+    dev[0].request("DISCONNECT")
+
+    dev[0].select_network(id, freq="2412")
+    ev = dev[0].wait_event(["CTRL-REQ-SIM"], timeout=15)
+    if ev is None:
+        raise Exception("Wait for external SIM processing request timed out")
+    p = ev.split(':', 2)
+    if p[1] != "GSM-AUTH":
+        raise Exception("Unexpected CTRL-REQ-SIM type")
+    rid = p[0].split('-')[3]
+    # This will fail during GSM auth validation
+    if "OK" not in dev[0].request("CTRL-RSP-SIM-" + rid + ":GSM-AUTH:q"):
+        raise Exception("CTRL-RSP-SIM failed")
+    ev = dev[0].wait_event(["CTRL-EVENT-EAP-FAILURE"], timeout=15)
+    if ev is None:
+        raise Exception("EAP failure not reported")
+    dev[0].request("DISCONNECT")
+
+    dev[0].select_network(id, freq="2412")
+    ev = dev[0].wait_event(["CTRL-REQ-SIM"], timeout=15)
+    if ev is None:
+        raise Exception("Wait for external SIM processing request timed out")
+    p = ev.split(':', 2)
+    if p[1] != "GSM-AUTH":
+        raise Exception("Unexpected CTRL-REQ-SIM type")
+    rid = p[0].split('-')[3]
+    # This will fail during GSM auth validation
+    if "OK" not in dev[0].request("CTRL-RSP-SIM-" + rid + ":GSM-AUTH:34"):
+        raise Exception("CTRL-RSP-SIM failed")
+    ev = dev[0].wait_event(["CTRL-EVENT-EAP-FAILURE"], timeout=15)
+    if ev is None:
+        raise Exception("EAP failure not reported")
+    dev[0].request("DISCONNECT")
+
+    dev[0].select_network(id, freq="2412")
+    ev = dev[0].wait_event(["CTRL-REQ-SIM"], timeout=15)
+    if ev is None:
+        raise Exception("Wait for external SIM processing request timed out")
+    p = ev.split(':', 2)
+    if p[1] != "GSM-AUTH":
+        raise Exception("Unexpected CTRL-REQ-SIM type")
+    rid = p[0].split('-')[3]
+    # This will fail during GSM auth validation
+    if "OK" not in dev[0].request("CTRL-RSP-SIM-" + rid + ":GSM-AUTH:0011223344556677"):
+        raise Exception("CTRL-RSP-SIM failed")
+    ev = dev[0].wait_event(["CTRL-EVENT-EAP-FAILURE"], timeout=15)
+    if ev is None:
+        raise Exception("EAP failure not reported")
+    dev[0].request("DISCONNECT")
+
+    dev[0].select_network(id, freq="2412")
+    ev = dev[0].wait_event(["CTRL-REQ-SIM"], timeout=15)
+    if ev is None:
+        raise Exception("Wait for external SIM processing request timed out")
+    p = ev.split(':', 2)
+    if p[1] != "GSM-AUTH":
+        raise Exception("Unexpected CTRL-REQ-SIM type")
+    rid = p[0].split('-')[3]
+    # This will fail during GSM auth validation
+    if "OK" not in dev[0].request("CTRL-RSP-SIM-" + rid + ":GSM-AUTH:0011223344556677:q"):
+        raise Exception("CTRL-RSP-SIM failed")
+    ev = dev[0].wait_event(["CTRL-EVENT-EAP-FAILURE"], timeout=15)
+    if ev is None:
+        raise Exception("EAP failure not reported")
+    dev[0].request("DISCONNECT")
+
+    dev[0].select_network(id, freq="2412")
+    ev = dev[0].wait_event(["CTRL-REQ-SIM"], timeout=15)
+    if ev is None:
+        raise Exception("Wait for external SIM processing request timed out")
+    p = ev.split(':', 2)
+    if p[1] != "GSM-AUTH":
+        raise Exception("Unexpected CTRL-REQ-SIM type")
+    rid = p[0].split('-')[3]
+    # This will fail during GSM auth validation
+    if "OK" not in dev[0].request("CTRL-RSP-SIM-" + rid + ":GSM-AUTH:0011223344556677:00112233"):
+        raise Exception("CTRL-RSP-SIM failed")
+    ev = dev[0].wait_event(["CTRL-EVENT-EAP-FAILURE"], timeout=15)
+    if ev is None:
+        raise Exception("EAP failure not reported")
+    dev[0].request("DISCONNECT")
+
+    dev[0].select_network(id, freq="2412")
+    ev = dev[0].wait_event(["CTRL-REQ-SIM"], timeout=15)
+    if ev is None:
+        raise Exception("Wait for external SIM processing request timed out")
+    p = ev.split(':', 2)
+    if p[1] != "GSM-AUTH":
+        raise Exception("Unexpected CTRL-REQ-SIM type")
+    rid = p[0].split('-')[3]
+    # This will fail during GSM auth validation
+    if "OK" not in dev[0].request("CTRL-RSP-SIM-" + rid + ":GSM-AUTH:0011223344556677:00112233:q"):
+        raise Exception("CTRL-RSP-SIM failed")
+    ev = dev[0].wait_event(["CTRL-EVENT-EAP-FAILURE"], timeout=15)
+    if ev is None:
+        raise Exception("EAP failure not reported")
+
 def test_ap_wpa2_eap_aka(dev, apdev):
     """WPA2-Enterprise connection using EAP-AKA"""
     if not os.path.exists("/tmp/hlr_auc_gw.sock"):
@@ -232,6 +388,44 @@ def test_ap_wpa2_eap_aka(dev, apdev):
     dev[0].request("REMOVE_NETWORK all")
     eap_connect(dev[0], apdev[0], "AKA", "0232010000000000",
                 password="ffdca4eda45b53cf0f12d7c9c3bc6a89:cb9cccc4b9258e6dca4760379fb82581:000000000123",
+                expect_failure=True)
+
+    logger.info("Invalid Milenage key")
+    dev[0].request("REMOVE_NETWORK all")
+    eap_connect(dev[0], apdev[0], "AKA", "0232010000000000",
+                password="ffdca4eda45b53cf0f12d7c9c3bc6a",
+                expect_failure=True)
+
+    logger.info("Invalid Milenage key(2)")
+    eap_connect(dev[0], apdev[0], "AKA", "0232010000000000",
+                password="ffdca4eda45b53cf0f12d7c9c3bc6a8q:cb9cccc4b9258e6dca4760379fb82581:000000000123",
+                expect_failure=True)
+
+    logger.info("Invalid Milenage key(3)")
+    eap_connect(dev[0], apdev[0], "AKA", "0232010000000000",
+                password="ffdca4eda45b53cf0f12d7c9c3bc6a89:cb9cccc4b9258e6dca4760379fb8258q:000000000123",
+                expect_failure=True)
+
+    logger.info("Invalid Milenage key(4)")
+    eap_connect(dev[0], apdev[0], "AKA", "0232010000000000",
+                password="ffdca4eda45b53cf0f12d7c9c3bc6a89:cb9cccc4b9258e6dca4760379fb82581:00000000012q",
+                expect_failure=True)
+
+    logger.info("Invalid Milenage key(5)")
+    dev[0].request("REMOVE_NETWORK all")
+    eap_connect(dev[0], apdev[0], "AKA", "0232010000000000",
+                password="ffdca4eda45b53cf0f12d7c9c3bc6a89:cb9cccc4b9258e6dca4760379fb82581q000000000123",
+                expect_failure=True)
+
+    logger.info("Invalid Milenage key(6)")
+    dev[0].request("REMOVE_NETWORK all")
+    eap_connect(dev[0], apdev[0], "AKA", "0232010000000000",
+                password="ffdca4eda45b53cf0f12d7c9c3bc6a89qcb9cccc4b9258e6dca4760379fb82581q000000000123",
+                expect_failure=True)
+
+    logger.info("Missing key configuration")
+    dev[0].request("REMOVE_NETWORK all")
+    eap_connect(dev[0], apdev[0], "AKA", "0232010000000000",
                 expect_failure=True)
 
 def test_ap_wpa2_eap_aka_sql(dev, apdev, params):
@@ -345,6 +539,128 @@ def test_ap_wpa2_eap_aka_ext(dev, apdev):
     rid = p[0].split('-')[3]
     # This will fail during UMTS auth validation
     if "OK" not in dev[0].request("CTRL-RSP-SIM-" + rid + ":UMTS-AUTH:" + resp):
+        raise Exception("CTRL-RSP-SIM failed")
+    ev = dev[0].wait_event(["CTRL-EVENT-EAP-FAILURE"], timeout=15)
+    if ev is None:
+        raise Exception("EAP failure not reported")
+    dev[0].request("DISCONNECT")
+
+    dev[0].select_network(id, freq="2412")
+    ev = dev[0].wait_event(["CTRL-REQ-SIM"], timeout=15)
+    if ev is None:
+        raise Exception("Wait for external SIM processing request timed out")
+    p = ev.split(':', 2)
+    if p[1] != "UMTS-AUTH":
+        raise Exception("Unexpected CTRL-REQ-SIM type")
+    rid = p[0].split('-')[3]
+    # This will fail during UMTS auth validation
+    if "OK" not in dev[0].request("CTRL-RSP-SIM-" + rid + ":UMTS-AUTS:112233445566778899aabbccddee"):
+        raise Exception("CTRL-RSP-SIM failed")
+    ev = dev[0].wait_event(["CTRL-REQ-SIM"], timeout=15)
+    if ev is None:
+        raise Exception("Wait for external SIM processing request timed out")
+    p = ev.split(':', 2)
+    if p[1] != "UMTS-AUTH":
+        raise Exception("Unexpected CTRL-REQ-SIM type")
+    rid = p[0].split('-')[3]
+    # This will fail during UMTS auth validation
+    if "OK" not in dev[0].request("CTRL-RSP-SIM-" + rid + ":UMTS-AUTS:12"):
+        raise Exception("CTRL-RSP-SIM failed")
+    ev = dev[0].wait_event(["CTRL-EVENT-EAP-FAILURE"], timeout=15)
+    if ev is None:
+        raise Exception("EAP failure not reported")
+    dev[0].request("DISCONNECT")
+
+    dev[0].select_network(id, freq="2412")
+    ev = dev[0].wait_event(["CTRL-REQ-SIM"], timeout=15)
+    if ev is None:
+        raise Exception("Wait for external SIM processing request timed out")
+    p = ev.split(':', 2)
+    if p[1] != "UMTS-AUTH":
+        raise Exception("Unexpected CTRL-REQ-SIM type")
+    rid = p[0].split('-')[3]
+    # This will fail during UMTS auth validation
+    if "OK" not in dev[0].request("CTRL-RSP-SIM-" + rid + ":UMTS-AUTH:34"):
+        raise Exception("CTRL-RSP-SIM failed")
+    ev = dev[0].wait_event(["CTRL-EVENT-EAP-FAILURE"], timeout=15)
+    if ev is None:
+        raise Exception("EAP failure not reported")
+    dev[0].request("DISCONNECT")
+
+    dev[0].select_network(id, freq="2412")
+    ev = dev[0].wait_event(["CTRL-REQ-SIM"], timeout=15)
+    if ev is None:
+        raise Exception("Wait for external SIM processing request timed out")
+    p = ev.split(':', 2)
+    if p[1] != "UMTS-AUTH":
+        raise Exception("Unexpected CTRL-REQ-SIM type")
+    rid = p[0].split('-')[3]
+    # This will fail during UMTS auth validation
+    if "OK" not in dev[0].request("CTRL-RSP-SIM-" + rid + ":UMTS-AUTH:00112233445566778899aabbccddeeff.00112233445566778899aabbccddeeff:0011223344"):
+        raise Exception("CTRL-RSP-SIM failed")
+    ev = dev[0].wait_event(["CTRL-EVENT-EAP-FAILURE"], timeout=15)
+    if ev is None:
+        raise Exception("EAP failure not reported")
+    dev[0].request("DISCONNECT")
+
+    dev[0].select_network(id, freq="2412")
+    ev = dev[0].wait_event(["CTRL-REQ-SIM"], timeout=15)
+    if ev is None:
+        raise Exception("Wait for external SIM processing request timed out")
+    p = ev.split(':', 2)
+    if p[1] != "UMTS-AUTH":
+        raise Exception("Unexpected CTRL-REQ-SIM type")
+    rid = p[0].split('-')[3]
+    # This will fail during UMTS auth validation
+    if "OK" not in dev[0].request("CTRL-RSP-SIM-" + rid + ":UMTS-AUTH:00112233445566778899aabbccddeeff:00112233445566778899aabbccddee:0011223344"):
+        raise Exception("CTRL-RSP-SIM failed")
+    ev = dev[0].wait_event(["CTRL-EVENT-EAP-FAILURE"], timeout=15)
+    if ev is None:
+        raise Exception("EAP failure not reported")
+    dev[0].request("DISCONNECT")
+
+    dev[0].select_network(id, freq="2412")
+    ev = dev[0].wait_event(["CTRL-REQ-SIM"], timeout=15)
+    if ev is None:
+        raise Exception("Wait for external SIM processing request timed out")
+    p = ev.split(':', 2)
+    if p[1] != "UMTS-AUTH":
+        raise Exception("Unexpected CTRL-REQ-SIM type")
+    rid = p[0].split('-')[3]
+    # This will fail during UMTS auth validation
+    if "OK" not in dev[0].request("CTRL-RSP-SIM-" + rid + ":UMTS-AUTH:00112233445566778899aabbccddeeff:00112233445566778899aabbccddeeff.0011223344"):
+        raise Exception("CTRL-RSP-SIM failed")
+    ev = dev[0].wait_event(["CTRL-EVENT-EAP-FAILURE"], timeout=15)
+    if ev is None:
+        raise Exception("EAP failure not reported")
+    dev[0].request("DISCONNECT")
+
+    dev[0].select_network(id, freq="2412")
+    ev = dev[0].wait_event(["CTRL-REQ-SIM"], timeout=15)
+    if ev is None:
+        raise Exception("Wait for external SIM processing request timed out")
+    p = ev.split(':', 2)
+    if p[1] != "UMTS-AUTH":
+        raise Exception("Unexpected CTRL-REQ-SIM type")
+    rid = p[0].split('-')[3]
+    # This will fail during UMTS auth validation
+    if "OK" not in dev[0].request("CTRL-RSP-SIM-" + rid + ":UMTS-AUTH:00112233445566778899aabbccddeeff:00112233445566778899aabbccddeeff:00112233445566778899aabbccddeeff0011223344"):
+        raise Exception("CTRL-RSP-SIM failed")
+    ev = dev[0].wait_event(["CTRL-EVENT-EAP-FAILURE"], timeout=15)
+    if ev is None:
+        raise Exception("EAP failure not reported")
+    dev[0].request("DISCONNECT")
+
+    dev[0].select_network(id, freq="2412")
+    ev = dev[0].wait_event(["CTRL-REQ-SIM"], timeout=15)
+    if ev is None:
+        raise Exception("Wait for external SIM processing request timed out")
+    p = ev.split(':', 2)
+    if p[1] != "UMTS-AUTH":
+        raise Exception("Unexpected CTRL-REQ-SIM type")
+    rid = p[0].split('-')[3]
+    # This will fail during UMTS auth validation
+    if "OK" not in dev[0].request("CTRL-RSP-SIM-" + rid + ":UMTS-AUTH:00112233445566778899aabbccddeeff:00112233445566778899aabbccddeeff:001122334q"):
         raise Exception("CTRL-RSP-SIM failed")
     ev = dev[0].wait_event(["CTRL-EVENT-EAP-FAILURE"], timeout=15)
     if ev is None:
@@ -857,6 +1173,87 @@ def test_ap_wpa2_eap_tls_neg_incorrect_trust_root(dev, apdev):
         if ev is None:
             raise Exception("Network block disabling not reported")
 
+def test_ap_wpa2_eap_tls_diff_ca_trust(dev, apdev):
+    """WPA2-Enterprise connection using EAP-TTLS/PAP and different CA trust"""
+    params = hostapd.wpa2_eap_params(ssid="test-wpa2-eap")
+    hapd = hostapd.add_ap(apdev[0]['ifname'], params)
+    dev[0].connect("test-wpa2-eap", key_mgmt="WPA-EAP", eap="TTLS",
+                   identity="pap user", anonymous_identity="ttls",
+                   password="password", phase2="auth=PAP",
+                   ca_cert="auth_serv/ca.pem",
+                   wait_connect=True, scan_freq="2412")
+    id = dev[0].connect("test-wpa2-eap", key_mgmt="WPA-EAP", eap="TTLS",
+                        identity="pap user", anonymous_identity="ttls",
+                        password="password", phase2="auth=PAP",
+                        ca_cert="auth_serv/ca-incorrect.pem",
+                        only_add_network=True, scan_freq="2412")
+
+    dev[0].request("DISCONNECT")
+    dev[0].dump_monitor()
+    dev[0].select_network(id, freq="2412")
+
+    ev = dev[0].wait_event(["CTRL-EVENT-EAP-PROPOSED-METHOD vendor=0 method=21"], timeout=15)
+    if ev is None:
+        raise Exception("EAP-TTLS not re-started")
+    
+    ev = dev[0].wait_event(["CTRL-EVENT-DISCONNECTED"], timeout=15)
+    if ev is None:
+        raise Exception("Disconnection timed out")
+    if "reason=23" not in ev:
+        raise Exception("Proper reason code for disconnection not reported")
+
+def test_ap_wpa2_eap_tls_diff_ca_trust2(dev, apdev):
+    """WPA2-Enterprise connection using EAP-TTLS/PAP and different CA trust"""
+    params = hostapd.wpa2_eap_params(ssid="test-wpa2-eap")
+    hapd = hostapd.add_ap(apdev[0]['ifname'], params)
+    dev[0].connect("test-wpa2-eap", key_mgmt="WPA-EAP", eap="TTLS",
+                   identity="pap user", anonymous_identity="ttls",
+                   password="password", phase2="auth=PAP",
+                   wait_connect=True, scan_freq="2412")
+    id = dev[0].connect("test-wpa2-eap", key_mgmt="WPA-EAP", eap="TTLS",
+                        identity="pap user", anonymous_identity="ttls",
+                        password="password", phase2="auth=PAP",
+                        ca_cert="auth_serv/ca-incorrect.pem",
+                        only_add_network=True, scan_freq="2412")
+
+    dev[0].request("DISCONNECT")
+    dev[0].dump_monitor()
+    dev[0].select_network(id, freq="2412")
+
+    ev = dev[0].wait_event(["CTRL-EVENT-EAP-PROPOSED-METHOD vendor=0 method=21"], timeout=15)
+    if ev is None:
+        raise Exception("EAP-TTLS not re-started")
+    
+    ev = dev[0].wait_event(["CTRL-EVENT-DISCONNECTED"], timeout=15)
+    if ev is None:
+        raise Exception("Disconnection timed out")
+    if "reason=23" not in ev:
+        raise Exception("Proper reason code for disconnection not reported")
+
+def test_ap_wpa2_eap_tls_diff_ca_trust3(dev, apdev):
+    """WPA2-Enterprise connection using EAP-TTLS/PAP and different CA trust"""
+    params = hostapd.wpa2_eap_params(ssid="test-wpa2-eap")
+    hapd = hostapd.add_ap(apdev[0]['ifname'], params)
+    id = dev[0].connect("test-wpa2-eap", key_mgmt="WPA-EAP", eap="TTLS",
+                        identity="pap user", anonymous_identity="ttls",
+                        password="password", phase2="auth=PAP",
+                        ca_cert="auth_serv/ca.pem",
+                        wait_connect=True, scan_freq="2412")
+    dev[0].request("DISCONNECT")
+    dev[0].dump_monitor()
+    dev[0].set_network_quoted(id, "ca_cert", "auth_serv/ca-incorrect.pem")
+    dev[0].select_network(id, freq="2412")
+
+    ev = dev[0].wait_event(["CTRL-EVENT-EAP-PROPOSED-METHOD vendor=0 method=21"], timeout=15)
+    if ev is None:
+        raise Exception("EAP-TTLS not re-started")
+    
+    ev = dev[0].wait_event(["CTRL-EVENT-DISCONNECTED"], timeout=15)
+    if ev is None:
+        raise Exception("Disconnection timed out")
+    if "reason=23" not in ev:
+        raise Exception("Proper reason code for disconnection not reported")
+
 def test_ap_wpa2_eap_tls_neg_suffix_match(dev, apdev):
     """WPA2-Enterprise negative test - domain suffix mismatch"""
     params = hostapd.wpa2_eap_params(ssid="test-wpa2-eap")
@@ -1026,7 +1423,7 @@ def test_ap_wpa2_eap_unauth_tls(dev, apdev):
 
 def test_ap_wpa2_eap_ttls_server_cert_hash(dev, apdev):
     """WPA2-Enterprise connection using EAP-TTLS and server certificate hash"""
-    srv_cert_hash = "0a3f81f63569226657a069855bb13f3b922670437a2b87585a4734f70ac7315b"
+    srv_cert_hash = "1477c9cd88391609444b83eca45c4f9f324e3051c5c31fc233ac6aede30ce7cd"
     params = hostapd.wpa2_eap_params(ssid="test-wpa2-eap")
     hostapd.add_ap(apdev[0]['ifname'], params)
     dev[0].connect("test-wpa2-eap", key_mgmt="WPA-EAP", eap="TTLS",
