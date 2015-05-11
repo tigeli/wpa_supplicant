@@ -13,7 +13,7 @@
 
 #ifdef ANDROID
 #include <sys/capability.h>
-#include <linux/prctl.h>
+#include <sys/prctl.h>
 #include <private/android_filesystem_config.h>
 #endif /* ANDROID */
 
@@ -448,6 +448,20 @@ size_t os_strlcpy(char *dest, const char *src, size_t siz)
 	}
 
 	return s - src - 1;
+}
+
+
+int os_memcmp_const(const void *a, const void *b, size_t len)
+{
+	const u8 *aa = a;
+	const u8 *bb = b;
+	size_t i;
+	u8 res;
+
+	for (res = 0, i = 0; i < len; i++)
+		res |= aa[i] ^ bb[i];
+
+	return res;
 }
 
 

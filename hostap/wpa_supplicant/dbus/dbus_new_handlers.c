@@ -272,6 +272,7 @@ dbus_bool_t set_network_properties(struct wpa_supplicant *wpa_s,
 			wpa_config_update_prio_list(wpa_s->conf);
 
 		os_free(value);
+		value = NULL;
 		wpa_dbus_dict_entry_clear(&entry);
 	}
 
@@ -440,8 +441,13 @@ dbus_bool_t wpas_dbus_simple_array_property_getter(DBusMessageIter *iter,
 	}
 
 	for (i = 0; i < array_len; i++) {
-		dbus_message_iter_append_basic(&array_iter, type,
-					       array + i * element_size);
+		if (!dbus_message_iter_append_basic(&array_iter, type,
+						    array + i * element_size)) {
+			dbus_set_error(error, DBUS_ERROR_FAILED,
+				       "%s: failed to construct message 2.5",
+				       __func__);
+			return FALSE;
+		}
 	}
 
 	if (!dbus_message_iter_close_container(&variant_iter, &array_iter)) {
@@ -507,7 +513,7 @@ dbus_bool_t wpas_dbus_simple_array_array_property_getter(DBusMessageIter *iter,
 		return FALSE;
 	}
 
-	for (i = 0; i < array_len; i++) {
+	for (i = 0; i < array_len && array[i]; i++) {
 		wpa_dbus_dict_bin_array_add_element(&array_iter,
 						    wpabuf_head(array[i]),
 						    wpabuf_len(array[i]));
@@ -562,24 +568,28 @@ DBusMessage * wpas_dbus_handler_create_interface(DBusMessage *message,
 			goto error;
 		if (!os_strcmp(entry.key, "Driver") &&
 		    (entry.type == DBUS_TYPE_STRING)) {
+			os_free(driver);
 			driver = os_strdup(entry.str_value);
 			wpa_dbus_dict_entry_clear(&entry);
 			if (driver == NULL)
 				goto error;
 		} else if (!os_strcmp(entry.key, "Ifname") &&
 			   (entry.type == DBUS_TYPE_STRING)) {
+			os_free(ifname);
 			ifname = os_strdup(entry.str_value);
 			wpa_dbus_dict_entry_clear(&entry);
 			if (ifname == NULL)
 				goto error;
 		} else if (!os_strcmp(entry.key, "ConfigFile") &&
 			   (entry.type == DBUS_TYPE_STRING)) {
+			os_free(confname);
 			confname = os_strdup(entry.str_value);
 			wpa_dbus_dict_entry_clear(&entry);
 			if (confname == NULL)
 				goto error;
 		} else if (!os_strcmp(entry.key, "BridgeIfname") &&
 			   (entry.type == DBUS_TYPE_STRING)) {
+			os_free(bridge_ifname);
 			bridge_ifname = os_strdup(entry.str_value);
 			wpa_dbus_dict_entry_clear(&entry);
 			if (bridge_ifname == NULL)
@@ -1438,9 +1448,11 @@ DBusMessage * wpas_dbus_handler_signal_poll(DBusMessage *message,
 	if (!wpa_dbus_dict_append_uint32(&iter_dict, "frequency", si.frequency))
 		goto nomem;
 
-	if (!wpa_dbus_dict_append_string(&iter_dict, "width",
-				channel_width_to_string(si.chanwidth)))
-		goto nomem;
+	if (si.chanwidth != CHAN_WIDTH_UNKNOWN) {
+		if (!wpa_dbus_dict_append_string(&iter_dict, "width",
+					channel_width_to_string(si.chanwidth)))
+			goto nomem;
+	}
 
 	if (si.center_frq1 > 0 && si.center_frq2 > 0) {
 		if (!wpa_dbus_dict_append_int32(&iter_dict, "center-frq1",
@@ -4024,6 +4036,35 @@ dbus_bool_t wpas_dbus_getter_bss_ies(DBusMessageIter *iter, DBusError *error,
 	return wpas_dbus_simple_array_property_getter(iter, DBUS_TYPE_BYTE,
 						      res + 1, res->ie_len,
 						      error);
+}
+
+
+/**
+ * wpas_dbus_getter_bss_age - Return time in seconds since BSS was last seen
+ * @iter: Pointer to incoming dbus message iter
+ * @error: Location to store error on failure
+ * @user_data: Function specific data
+ * Returns: TRUE on success, FALSE on failure
+ *
+ * Getter for BSS age
+ */
+dbus_bool_t wpas_dbus_getter_bss_age(DBusMessageIter *iter, DBusError *error,
+				     void *user_data)
+{
+	struct bss_handler_args *args = user_data;
+	struct wpa_bss *res;
+	struct os_reltime now, diff = { 0, 0 };
+	u32 age;
+
+	res = get_bss_helper(args, error, __func__);
+	if (!res)
+		return FALSE;
+
+	os_get_reltime(&now);
+	os_reltime_sub(&now, &res->last_update, &diff);
+	age = diff.sec > 0 ? diff.sec : 0;
+	return wpas_dbus_simple_property_getter(iter, DBUS_TYPE_UINT32, &age,
+						error);
 }
 
 

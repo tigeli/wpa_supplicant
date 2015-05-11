@@ -313,6 +313,10 @@ class WpaSupplicant:
             return vals[field]
         return None
 
+    def get_mcc(self):
+	mcc = int(self.get_driver_status_field('capa.num_multichan_concurrent'))
+	return 1 if mcc < 2 else mcc
+
     def get_mib(self):
         res = self.request("MIB")
         lines = res.splitlines()
@@ -664,7 +668,7 @@ class WpaSupplicant:
                        "wpa_ptk_rekey", "disable_ht", "disable_vht", "bssid",
                        "disable_max_amsdu", "ampdu_factor", "ampdu_density",
                        "disable_ht40", "disable_sgi", "disable_ldpc",
-                       "ht40_intolerant" ]
+                       "ht40_intolerant", "update_identifier", "mac_addr" ]
         for field in not_quoted:
             if field in kwargs and kwargs[field]:
                 self.set_network(id, field, kwargs[field])
@@ -714,7 +718,7 @@ class WpaSupplicant:
         if not force_scan and self.get_bss(bssid) is not None:
             return
         for i in range(0, 10):
-            self.scan(freq=freq)
+            self.scan(freq=freq, type="ONLY")
             if self.get_bss(bssid) is not None:
                 return
         raise Exception("Could not find BSS " + bssid + " in scan")

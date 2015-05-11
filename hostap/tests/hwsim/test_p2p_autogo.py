@@ -14,9 +14,9 @@ import utils
 from wlantest import Wlantest
 from wpasupplicant import WpaSupplicant
 
-def autogo(go, freq=None):
+def autogo(go, freq=None, persistent=None):
     logger.info("Start autonomous GO " + go.ifname)
-    res = go.p2p_start_go(freq=freq)
+    res = go.p2p_start_go(freq=freq, persistent=persistent)
     logger.debug("res: " + str(res))
     return res
 
@@ -347,3 +347,77 @@ def test_autogo_start_during_scan(dev):
         dev[1].wait_go_ending_session()
     finally:
         dev[0].request("AUTOSCAN ")
+
+def test_autogo_passphrase_len(dev):
+    """P2P autonomous GO and longer passphrase"""
+    try:
+        if "OK" not in dev[0].request("SET p2p_passphrase_len 13"):
+            raise Exception("Failed to set passphrase length")
+        res = autogo(dev[0])
+        if len(res['passphrase']) != 13:
+            raise Exception("Unexpected passphrase length")
+        if dev[0].get_group_status_field("passphrase", extra="WPS") != res['passphrase']:
+            raise Exception("passphrase mismatch")
+
+        logger.info("Connect P2P client")
+        connect_cli(dev[0], dev[1])
+
+        logger.info("Connect legacy WPS client")
+        pin = dev[2].wps_read_pin()
+        dev[0].p2p_go_authorize_client(pin)
+        dev[2].request("P2P_SET disabled 1")
+        dev[2].dump_monitor()
+        dev[2].request("WPS_PIN any " + pin)
+        ev = dev[2].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
+        if ev is None:
+            raise Exception("Association with the GO timed out")
+        status = dev[2].get_status()
+        if status['wpa_state'] != 'COMPLETED':
+            raise Exception("Not fully connected")
+        dev[2].request("DISCONNECT")
+
+        logger.info("Connect legacy non-WPS client")
+        dev[2].request("FLUSH")
+        dev[2].request("P2P_SET disabled 1")
+        dev[2].connect(ssid=res['ssid'], psk=res['passphrase'], proto='RSN',
+                       key_mgmt='WPA-PSK', pairwise='CCMP', group='CCMP',
+                       scan_freq=res['freq'])
+        hwsim_utils.test_connectivity_p2p_sta(dev[1], dev[2])
+        dev[2].request("DISCONNECT")
+
+        dev[0].remove_group()
+        dev[1].wait_go_ending_session()
+    finally:
+        dev[0].request("SET p2p_passphrase_len 8")
+
+def test_autogo_bridge(dev):
+    """P2P autonomous GO in a bridge"""
+    try:
+        # use autoscan to set scan_req = MANUAL_SCAN_REQ
+        if "OK" not in dev[0].request("AUTOSCAN periodic:1"):
+            raise Exception("Failed to set autoscan")
+        autogo(dev[0])
+        subprocess.call(['sudo', 'brctl', 'addbr', 'p2p-br0'])
+        subprocess.call(['sudo', 'brctl', 'setfd', 'p2p-br0', '0'])
+        subprocess.call(['sudo', 'brctl', 'addif', 'p2p-br0', dev[0].ifname])
+        subprocess.call(['sudo', 'ip', 'link', 'set', 'dev', 'p2p-br0', 'up'])
+        time.sleep(0.1)
+        subprocess.call(['sudo', 'brctl', 'delif', 'p2p-br0', dev[0].ifname])
+        time.sleep(0.1)
+        subprocess.call(['sudo', 'ip', 'link', 'set', 'dev', 'p2p-br0', 'down'])
+        time.sleep(0.1)
+        subprocess.call(['sudo', 'brctl', 'delbr', 'p2p-br0'])
+        ev = dev[0].wait_global_event(["P2P-GROUP-REMOVED"], timeout=1)
+        if ev is not None:
+            raise Exception("P2P group removed unexpectedly")
+        if dev[0].get_status_field('wpa_state') != "COMPLETED":
+            raise Exception("Unexpected wpa_state")
+        dev[0].remove_group()
+    finally:
+        dev[0].request("AUTOSCAN ")
+        subprocess.Popen(['sudo', 'brctl', 'delif', 'p2p-br0', dev[0].ifname],
+                         stderr=open('/dev/null', 'w'))
+        subprocess.Popen(['sudo', 'ip', 'link', 'set', 'dev', 'p2p-br0', 'down'],
+                         stderr=open('/dev/null', 'w'))
+        subprocess.Popen(['sudo', 'brctl', 'delbr', 'p2p-br0'],
+                         stderr=open('/dev/null', 'w'))
