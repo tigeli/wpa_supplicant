@@ -1,8 +1,8 @@
 Name:       wpa_supplicant
 
 Summary:    WPA/WPA2/IEEE 802.1X Supplicant
-Version:    2.2
-Release:    5
+Version:    2.4
+Release:    1
 Group:      System Environment/Base
 License:    GPLv2
 URL:        http://w1.fi/wpa_supplicant/
