@@ -58,7 +58,8 @@ class Wlantest:
         return int(res)
 
     def clear_bss_counters(self, bssid):
-        subprocess.call([self.wlantest_cli, "clear_bss_counters", bssid]);
+        subprocess.call([self.wlantest_cli, "clear_bss_counters", bssid],
+                        stdout=open('/dev/null', 'w'));
 
     def info_sta(self, field, bssid, addr):
         res = subprocess.check_output([self.wlantest_cli, "info_sta",
@@ -126,6 +127,11 @@ class Wlantest:
         res = self.info_sta("rsn_capab", bssid, addr)
         if "MFPC" not in res:
             raise Exception("STA did not enable PMF")
+
+    def require_sta_no_pmf(self, bssid, addr):
+        res = self.info_sta("rsn_capab", bssid, addr)
+        if "MFPC" in res:
+            raise Exception("STA enabled PMF")
 
     def require_sta_key_mgmt(self, bssid, addr, key_mgmt):
         res = self.info_sta("key_mgmt", bssid, addr)

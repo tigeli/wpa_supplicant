@@ -1,7 +1,7 @@
 #!/usr/bin/env python2
 #
 # Test case executor
-# Copyright (c) 2013-2014, Jouni Malinen <j@w1.fi>
+# Copyright (c) 2013-2015, Jouni Malinen <j@w1.fi>
 #
 # This software may be distributed under the terms of the BSD license.
 # See README for more details.
@@ -13,16 +13,28 @@ import time
 from datetime import datetime
 import argparse
 import subprocess
+import termios
 
 import logging
 logger = logging.getLogger()
 
-sys.path.append('../../wpaspy')
+scriptsdir = os.path.dirname(os.path.realpath(sys.modules[__name__].__file__))
+sys.path.append(os.path.join(scriptsdir, '..', '..', 'wpaspy'))
 
 from wpasupplicant import WpaSupplicant
 from hostapd import HostapdGlobal
 from check_kernel import check_kernel
 from wlantest import Wlantest
+from utils import HwsimSkip
+
+def set_term_echo(fd, enabled):
+    [iflag, oflag, cflag, lflag, ispeed, ospeed, cc] = termios.tcgetattr(fd)
+    if enabled:
+        lflag |= termios.ECHO
+    else:
+        lflag &= ~termios.ECHO
+    termios.tcsetattr(fd, termios.TCSANOW,
+                      [iflag, oflag, cflag, lflag, ispeed, ospeed, cc])
 
 def reset_devs(dev, apdev):
     ok = True
@@ -34,11 +46,17 @@ def reset_devs(dev, apdev):
             print str(e)
             ok = False
 
+    wpas = None
     try:
         wpas = WpaSupplicant(global_iface='/tmp/wpas-wlan5')
-        wpas.interface_remove("wlan5")
+        ifaces = wpas.global_request("INTERFACES").splitlines()
+        for iface in ifaces:
+            if iface.startswith("wlan"):
+                wpas.interface_remove(iface)
     except Exception, e:
         pass
+    if wpas:
+        wpas.close_ctrl()
 
     try:
         hapd = HostapdGlobal()
@@ -70,7 +88,8 @@ def add_log_file(conn, test, run, type, path):
         print "sqlite: " + str(e)
         print "sql: %r" % (params, )
 
-def report(conn, prefill, build, commit, run, test, result, duration, logdir):
+def report(conn, prefill, build, commit, run, test, result, duration, logdir,
+           sql_commit=True):
     if conn:
         if not build:
             build = ''
@@ -82,7 +101,8 @@ def report(conn, prefill, build, commit, run, test, result, duration, logdir):
         params = (test, result, run, time.time(), duration, build, commit)
         try:
             conn.execute(sql, params)
-            conn.commit()
+            if sql_commit:
+                conn.commit()
         except Exception, e:
             print "sqlite: " + str(e)
             print "sql: %r" % (params, )
@@ -102,7 +122,7 @@ class DataCollector(object):
     def __enter__(self):
         if self._tracing:
             output = os.path.abspath(os.path.join(self._logdir, '%s.dat' % (self._testname, )))
-            self._trace_cmd = subprocess.Popen(['sudo', 'trace-cmd', 'record', '-o', output, '-e', 'mac80211', '-e', 'cfg80211', 'sh', '-c', 'echo STARTED ; read l'],
+            self._trace_cmd = subprocess.Popen(['trace-cmd', 'record', '-o', output, '-e', 'mac80211', '-e', 'cfg80211', '-e', 'printk', 'sh', '-c', 'echo STARTED ; read l'],
                                                stdin=subprocess.PIPE,
                                                stdout=subprocess.PIPE,
                                                stderr=open('/dev/null', 'w'),
@@ -120,7 +140,11 @@ class DataCollector(object):
             self._trace_cmd.wait()
         if self._dmesg:
             output = os.path.join(self._logdir, '%s.dmesg' % (self._testname, ))
-            subprocess.call(['sudo', 'dmesg', '-c'], stdout=open(output, 'w'))
+            num = 0
+            while os.path.exists(output):
+                output = os.path.join(self._logdir, '%s.dmesg-%d' % (self._testname, num))
+                num += 1
+            subprocess.call(['dmesg', '-c'], stdout=open(output, 'w'))
 
 def rename_log(logdir, basename, testname, dev):
     try:
@@ -135,7 +159,7 @@ def rename_log(logdir, basename, testname, dev):
         os.rename(srcname, dstname)
         if dev:
             dev.relog()
-            subprocess.call(['sudo', 'chown', '-f', getpass.getuser(), srcname])
+            subprocess.call(['chown', '-f', getpass.getuser(), srcname])
     except Exception, e:
         logger.info("Failed to rename log files")
         logger.info(e)
@@ -143,16 +167,16 @@ def rename_log(logdir, basename, testname, dev):
 def main():
     tests = []
     test_modules = []
-    for t in os.listdir("."):
+    files = os.listdir(scriptsdir)
+    for t in files:
         m = re.match(r'(test_.*)\.py$', t)
         if m:
             logger.debug("Import test cases from " + t)
             mod = __import__(m.group(1))
             test_modules.append(mod.__name__.replace('test_', '', 1))
-            for s in dir(mod):
-                if s.startswith("test_"):
-                    func = mod.__dict__.get(s)
-                    tests.append(func)
+            for key,val in mod.__dict__.iteritems():
+                if key.startswith("test_"):
+                    tests.append(val)
     test_names = list(set([t.__name__.replace('test_', '', 1) for t in tests]))
 
     run = None
@@ -192,15 +216,76 @@ def main():
     parser.add_argument('-f', dest='testmodules', metavar='<test module>',
                         help='execute only tests from these test modules',
                         type=str, choices=[[]] + test_modules, nargs='+')
+    parser.add_argument('-l', metavar='<modules file>', dest='mfile',
+                        help='test modules file name')
+    parser.add_argument('-i', action='store_true', dest='stdin_ctrl',
+                        help='stdin-controlled test case execution')
     parser.add_argument('tests', metavar='<test>', nargs='*', type=str,
                         help='tests to run (only valid without -f)',
                         choices=[[]] + test_names)
 
     args = parser.parse_args()
 
-    if args.tests and args.testmodules:
-        print 'Invalid arguments - both test module and tests given'
+    if (args.tests and args.testmodules) or (args.tests and args.mfile) or (args.testmodules and args.mfile):
+        print 'Invalid arguments - only one of (test, test modules, modules file) can be given.'
         sys.exit(2)
+
+    if args.database:
+        import sqlite3
+        conn = sqlite3.connect(args.database)
+        conn.execute('CREATE TABLE IF NOT EXISTS results (test,result,run,time,duration,build,commitid)')
+        conn.execute('CREATE TABLE IF NOT EXISTS tests (test,description)')
+        conn.execute('CREATE TABLE IF NOT EXISTS logs (test,run,type,contents)')
+    else:
+        conn = None
+
+    if conn:
+        run = int(time.time())
+
+    # read the modules from the modules file
+    if args.mfile:
+	args.testmodules = []
+	with open(args.mfile) as f:
+	    for line in f.readlines():
+		line = line.strip()
+		if not line or line.startswith('#'):
+		    continue
+	        args.testmodules.append(line)
+
+    tests_to_run = []
+    if args.tests:
+        for selected in args.tests:
+            for t in tests:
+                name = t.__name__.replace('test_', '', 1)
+                if name == selected:
+                    tests_to_run.append(t)
+    else:
+        for t in tests:
+            name = t.__name__.replace('test_', '', 1)
+            if args.testmodules:
+                if not t.__module__.replace('test_', '', 1) in args.testmodules:
+                    continue
+            tests_to_run.append(t)
+
+    if args.update_tests_db:
+        for t in tests_to_run:
+            name = t.__name__.replace('test_', '', 1)
+            if t.__doc__ is None:
+                print name + " - MISSING DESCRIPTION"
+            else:
+                print name + " - " + t.__doc__
+            if conn:
+                sql = 'INSERT OR REPLACE INTO tests(test,description) VALUES (?, ?)'
+                params = (name, t.__doc__)
+                try:
+                    conn.execute(sql, params)
+                except Exception, e:
+                    print "sqlite: " + str(e)
+                    print "sql: %r" % (params,)
+        if conn:
+            conn.commit()
+            conn.close()
+        sys.exit(0)
 
     if not args.logdir:
         if os.path.exists('logs/current'):
@@ -222,39 +307,6 @@ def main():
     log_formatter = logging.Formatter(fmt)
     log_handler.setFormatter(log_formatter)
     logger.addHandler(log_handler)
-
-    if args.database:
-        import sqlite3
-        conn = sqlite3.connect(args.database)
-        conn.execute('CREATE TABLE IF NOT EXISTS results (test,result,run,time,duration,build,commitid)')
-        conn.execute('CREATE TABLE IF NOT EXISTS tests (test,description)')
-        conn.execute('CREATE TABLE IF NOT EXISTS logs (test,run,type,contents)')
-    else:
-        conn = None
-
-    if conn:
-        run = int(time.time())
-
-    if args.update_tests_db:
-        for t in tests:
-            name = t.__name__.replace('test_', '', 1)
-            if t.__doc__ is None:
-                print name + " - MISSING DESCRIPTION"
-            else:
-                print name + " - " + t.__doc__
-            if conn:
-                sql = 'INSERT OR REPLACE INTO tests(test,description) VALUES (?, ?)'
-                params = (name, t.__doc__)
-                try:
-                    conn.execute(sql, params)
-                except Exception, e:
-                    print "sqlite: " + str(e)
-                    print "sql: %r" % (params,)
-        if conn:
-            conn.commit()
-            conn.close()
-        sys.exit(0)
-
 
     dev0 = WpaSupplicant('wlan0', '/tmp/wpas-wlan0')
     dev1 = WpaSupplicant('wlan1', '/tmp/wpas-wlan1')
@@ -285,24 +337,14 @@ def main():
         sys.exit(1)
 
     if args.dmesg:
-        subprocess.call(['sudo', 'dmesg', '-c'], stdout=open('/dev/null', 'w'))
-
-    tests_to_run = []
-    for t in tests:
-        name = t.__name__.replace('test_', '', 1)
-        if args.tests:
-            if not name in args.tests:
-                continue
-        if args.testmodules:
-            if not t.__module__.replace('test_', '', 1) in args.testmodules:
-                continue
-        tests_to_run.append(t)
+        subprocess.call(['dmesg', '-c'], stdout=open('/dev/null', 'w'))
 
     if conn and args.prefill:
         for t in tests_to_run:
             name = t.__name__.replace('test_', '', 1)
             report(conn, False, args.build, args.commit, run, name, 'NOTRUN', 0,
-                   args.logdir)
+                   args.logdir, sql_commit=False)
+        conn.commit()
 
     if args.split:
         vals = args.split.split('/')
@@ -318,7 +360,37 @@ def main():
         shuffle(tests_to_run)
 
     count = 0
-    for t in tests_to_run:
+    if args.stdin_ctrl:
+        print "READY"
+        sys.stdout.flush()
+        num_tests = 0
+    else:
+        num_tests = len(tests_to_run)
+    if args.stdin_ctrl:
+        set_term_echo(sys.stdin.fileno(), False)
+    while True:
+        if args.stdin_ctrl:
+            test = sys.stdin.readline()
+            if not test:
+                break
+            test = test.splitlines()[0]
+            if test == '':
+                break
+            t = None
+            for tt in tests:
+                name = tt.__name__.replace('test_', '', 1)
+                if name == test:
+                    t = tt
+                    break
+            if not t:
+                print "NOT-FOUND"
+                sys.stdout.flush()
+                continue
+        else:
+            if len(tests_to_run) == 0:
+                break
+            t = tests_to_run.pop(0)
+
         name = t.__name__.replace('test_', '', 1)
         if log_handler:
             log_handler.stream.close()
@@ -332,7 +404,7 @@ def main():
         reset_ok = True
         with DataCollector(args.logdir, name, args.tracing, args.dmesg):
             count = count + 1
-            msg = "START {} {}/{}".format(name, count, len(tests_to_run))
+            msg = "START {} {}/{}".format(name, count, num_tests)
             logger.info(msg)
             if args.loglevel == logging.WARNING:
                 print msg
@@ -355,23 +427,27 @@ def main():
                     if conn:
                         conn.close()
                         conn = None
+                    if args.stdin_ctrl:
+                        set_term_echo(sys.stdin.fileno(), True)
                     sys.exit(1)
             try:
                 if t.func_code.co_argcount > 2:
                     params = {}
                     params['logdir'] = args.logdir
                     params['long'] = args.long
-                    res = t(dev, apdev, params)
+                    t(dev, apdev, params)
                 elif t.func_code.co_argcount > 1:
-                    res = t(dev, apdev)
+                    t(dev, apdev)
                 else:
-                    res = t(dev)
-                if res == "skip":
-                    result = "SKIP"
-                else:
-                    result = "PASS"
+                    t(dev)
+                result = "PASS"
+            except HwsimSkip, e:
+                logger.info("Skip test case: %s" % e)
+                result = "SKIP"
             except Exception, e:
                 logger.info(e)
+                if args.loglevel == logging.WARNING:
+                    print "Exception: " + str(e)
                 result = "FAIL"
             for d in dev:
                 try:
@@ -381,14 +457,16 @@ def main():
                     logger.info("Failed to issue TEST-STOP after {} for {}".format(name, d.ifname))
                     logger.info(e)
                     result = "FAIL"
+            wpas = None
             try:
-                wpas = WpaSupplicant("wlan5", "/tmp/wpas-wlan5")
-                d.dump_monitor()
+                wpas = WpaSupplicant(global_iface="/tmp/wpas-wlan5")
                 rename_log(args.logdir, 'log5', name, wpas)
                 if not args.no_reset:
                     wpas.remove_ifname()
             except Exception, e:
                 pass
+            if wpas:
+                wpas.close_ctrl()
             if args.no_reset:
                 print "Leaving devices in current state"
             else:
@@ -436,6 +514,8 @@ def main():
         if not reset_ok:
             print "Terminating early due to device reset failure"
             break
+    if args.stdin_ctrl:
+        set_term_echo(sys.stdin.fileno(), True)
 
     if log_handler:
         log_handler.stream.close()

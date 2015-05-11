@@ -9,7 +9,7 @@ fi
 LOGS=/tmp/hwsim-test-logs
 
 # increase the memory size if you want to run with valgrind, 512 MB works
-MEMORY=128
+MEMORY=192
 
 # Some ubuntu systems (notably 12.04) have issues with this - since the guest
 # mounts as read-only it should be safe to not specify ,readonly. Override in
@@ -41,80 +41,62 @@ fi
 
 
 CMD=$TESTDIR/vm/inside.sh
-if [ "$1" = "--ext" ]; then
-    shift
-    DATE=$(date +%s).$1
-    shift
-else
-    DATE=$(date +%s)
-fi
+
+unset RUN_TEST_ARGS
+TIMESTAMP=$(date +%s)
+DATE=$TIMESTAMP
+CODECOV=no
+TIMEWARP=0
+DELAY=0
+CODECOV_DIR=
+while [ "$1" != "" ]; do
+	case $1 in
+		--timestamp ) shift
+			TIMESTAMP=$1
+			shift
+			;;
+		--ext ) shift
+			DATE=$TIMESTAMP.$1
+			shift
+			;;
+		--codecov ) shift
+			CODECOV=yes
+			;;
+		--codecov_dir ) shift
+			CODECOV_DIR=$1
+			shift
+			;;
+		--timewrap ) shift
+			TIMEWARP=1
+			;;
+	        --delay ) shift
+			DELAY=$1
+			shift
+			;;
+		* )
+			RUN_TEST_ARGS="$RUN_TEST_ARGS$1 "
+			shift
+			;;
+	esac
+done
+
 LOGDIR=$LOGS/$DATE
 mkdir -p $LOGDIR
 
-if [ "$1" = "--codecov" ]; then
-    shift
-    CODECOV=yes
-    DIR=$PWD
-    if [ -e /tmp/logs ]; then
-	echo "/tmp/logs exists - cannot prepare build trees"
-	exit 1
-    fi
-    mkdir /tmp/logs
-    echo "Preparing separate build trees for hostapd/wpa_supplicant"
-    cd ../../..
-    git archive --format=tar --prefix=hostap/ HEAD > /tmp/logs/hostap.tar
-    cd $DIR
-    cat ../../../wpa_supplicant/.config > /tmp/logs/wpa_supplicant.config
-    echo "CONFIG_CODE_COVERAGE=y" >> /tmp/logs/wpa_supplicant.config
-    cat ../../../hostapd/.config > /tmp/logs/hostapd.config
-    echo "CONFIG_CODE_COVERAGE=y" >> /tmp/logs/hostapd.config
-
-    cd /tmp/logs
-    tar xf hostap.tar
-    mv hostap alt-wpa_supplicant
-    mv wpa_supplicant.config alt-wpa_supplicant/wpa_supplicant/.config
-    tar xf hostap.tar
-    mv hostap alt-hostapd
-    cp hostapd.config alt-hostapd/hostapd/.config
-    tar xf hostap.tar
-    mv hostap alt-hostapd-as
-    cp hostapd.config alt-hostapd-as/hostapd/.config
-    tar xf hostap.tar
-    mv hostap alt-hlr_auc_gw
-    mv hostapd.config alt-hlr_auc_gw/hostapd/.config
-    rm hostap.tar
-
-    cd /tmp/logs/alt-wpa_supplicant/wpa_supplicant
-    echo "Building wpa_supplicant"
-    make -j8 > /dev/null
-
-    cd /tmp/logs/alt-hostapd/hostapd
-    echo "Building hostapd"
-    make -j8 hostapd > /dev/null
-
-    cd /tmp/logs/alt-hostapd-as/hostapd
-    echo "Building hostapd (AS)"
-    make -j8 hostapd > /dev/null
-
-    cd /tmp/logs/alt-hlr_auc_gw/hostapd
-    echo "Building hlr_auc_gw"
-    make -j8 hlr_auc_gw > /dev/null
-
-    cd $DIR
-
-    mv /tmp/logs/alt-wpa_supplicant $LOGDIR
-    mv /tmp/logs/alt-hostapd $LOGDIR
-    mv /tmp/logs/alt-hostapd-as $LOGDIR
-    mv /tmp/logs/alt-hlr_auc_gw $LOGDIR
+if [ -n "$CODECOV_DIR" ]; then
+    cp -a $CODECOV_DIR/alt-wpa_supplicant $LOGDIR
+    cp -a $CODECOV_DIR/alt-hostapd $LOGDIR
+    cp -a $CODECOV_DIR/alt-hostapd-as $LOGDIR
+    cp -a $CODECOV_DIR/alt-hlr_auc_gw $LOGDIR
+elif [ $CODECOV = "yes" ]; then
+    ./build-codecov.sh $LOGDIR || exit 1
 else
     CODECOV=no
 fi
 
-if [ "$1" == "--timewarp" ] ; then
-    TIMEWARP=1
-    shift
-else
-    TIMEWARP=0
+if [ $DELAY -gt 0 ]; then
+    echo "Wait $DELAY seconds before starting VM"
+    sleep $DELAY
 fi
 
 echo "Starting test run in a virtual machine"
@@ -127,63 +109,18 @@ kvm \
 	-fsdev local,security_model=none,id=fsdev-logs,path="$LOGDIR",writeout=immediate \
 	-device virtio-9p-pci,id=fs-logs,fsdev=fsdev-logs,mount_tag=logshare \
 	-monitor null -serial stdio -serial file:$LOGDIR/console \
-	-append "mac80211_hwsim.channels=$CHANNELS mac80211_hwsim.radios=6 init=$CMD testdir=$TESTDIR timewarp=$TIMEWARP console=$KVMOUT root=/dev/root rootflags=trans=virtio,version=9p2000.u ro rootfstype=9p EPATH=$EPATH ARGS=$*"
+	-append "mac80211_hwsim.support_p2p_device=0 mac80211_hwsim.channels=$CHANNELS mac80211_hwsim.radios=6 init=$CMD testdir=$TESTDIR timewarp=$TIMEWARP console=$KVMOUT root=/dev/root rootflags=trans=virtio,version=9p2000.u ro rootfstype=9p EPATH=$EPATH ARGS=$RUN_TEST_ARGS"
 
 if [ $CODECOV = "yes" ]; then
-    mv $LOGDIR/alt-wpa_supplicant /tmp/logs
-    mv $LOGDIR/alt-hostapd /tmp/logs
-    mv $LOGDIR/alt-hostapd-as /tmp/logs
-    mv $LOGDIR/alt-hlr_auc_gw /tmp/logs
-
-    echo "Generating code coverage report for wpa_supplicant"
-    cd /tmp/logs/alt-wpa_supplicant/wpa_supplicant
-    lcov -c -d .. > lcov.info 2> lcov.log
-    genhtml -t "wpa_supplicant hwsim test run $DATE" lcov.info --output-directory $LOGDIR/lcov-wpa_supplicant >> lcov.log 2>&1
-    mv lcov.info lcov.log $LOGDIR/lcov-wpa_supplicant
-
-    echo "Generating code coverage report for hostapd"
-    cd /tmp/logs/alt-hostapd/hostapd
-    lcov -c -d .. > lcov.info 2> lcov.log
-    genhtml -t "hostapd hwsim test run $DATE" lcov.info --output-directory $LOGDIR/lcov-hostapd >> lcov.log 2>&1
-    mv lcov.info lcov.log $LOGDIR/lcov-hostapd
-
-    echo "Generating code coverage report for hostapd (AS)"
-    cd /tmp/logs/alt-hostapd-as/hostapd
-    lcov -c -d .. > lcov.info 2> lcov.log
-    genhtml -t "hostapd (AS) hwsim test run $DATE" lcov.info --output-directory $LOGDIR/lcov-hostapd-as >> lcov.log 2>&1
-    mv lcov.info lcov.log $LOGDIR/lcov-hostapd-as
-
-    echo "Generating code coverage report for hlr_auc_gw"
-    cd /tmp/logs/alt-hlr_auc_gw/hostapd
-    lcov -c -d .. > lcov.info 2> lcov.log
-    genhtml -t "hlr_auc_gw hwsim test run $DATE" lcov.info --output-directory $LOGDIR/lcov-hlr_auc_gw >> lcov.log 2>&1
-    mv lcov.info lcov.log $LOGDIR/lcov-hlr_auc_gw
-
-    echo "Generating combined code coverage report"
-    mkdir $LOGDIR/lcov-combined
-    for i in wpa_supplicant hostapd hostapd-as hlr_auc_gw; do
-	sed s%SF:/tmp/logs/alt-[^/]*/%SF:/tmp/logs/alt-wpa_supplicant/% < $LOGDIR/lcov-$i/lcov.info > $LOGDIR/lcov-combined/$i.info
-    done
-    cd $LOGDIR/lcov-combined
-    lcov -a wpa_supplicant.info -a hostapd.info -a hostapd-as.info -a hlr_auc_gw.info -o combined.info > lcov.log 2>&1
-    genhtml -t "wpa_supplicant/hostapd combined for hwsim test run $DATE" combined.info --output-directory . >> lcov.log 2>&1
-
-    cd $DIR
-    rm -r /tmp/logs/alt-wpa_supplicant
-    rm -r /tmp/logs/alt-hostapd
-    rm -r /tmp/logs/alt-hostapd-as
-    rm -r /tmp/logs/alt-hlr_auc_gw
-    rmdir /tmp/logs
+    echo "Preparing code coverage reports"
+    ./process-codecov.sh $LOGDIR "" restore
+    ./combine-codecov.sh $LOGDIR lcov
 fi
 
 echo
 echo "Test run completed"
 echo "Logfiles are at $LOGDIR"
 if [ $CODECOV = "yes" ]; then
-    echo "Code coverage reports:"
-    echo "wpa_supplicant: file://$LOGDIR/lcov-wpa_supplicant/index.html"
-    echo "hostapd: file://$LOGDIR/lcov-hostapd/index.html"
-    echo "hostapd (AS): file://$LOGDIR/lcov-hostapd-as/index.html"
-    echo "hlr_auc_gw: file://$LOGDIR/lcov-hlr_auc_gw/index.html"
-    echo "combined: file://$LOGDIR/lcov-combined/index.html"
+    echo "Code coverage report:"
+    echo "file://$LOGDIR/lcov/index.html"
 fi

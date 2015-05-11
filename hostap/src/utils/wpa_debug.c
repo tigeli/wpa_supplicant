@@ -561,6 +561,8 @@ int wpa_debug_open_file(const char *path)
 #ifndef _WIN32
 	setvbuf(out_file, NULL, _IOLBF, 0);
 #endif /* _WIN32 */
+#else /* CONFIG_DEBUG_FILE */
+	(void)path;
 #endif /* CONFIG_DEBUG_FILE */
 	return 0;
 }
@@ -576,6 +578,14 @@ void wpa_debug_close_file(void)
 	os_free(last_path);
 	last_path = NULL;
 #endif /* CONFIG_DEBUG_FILE */
+}
+
+
+void wpa_debug_setup_stdout(void)
+{
+#ifndef _WIN32
+	setvbuf(stdout, NULL, _IOLBF, 0);
+#endif /* _WIN32 */
 }
 
 #endif /* CONFIG_NO_STDOUT_DEBUG */
@@ -623,7 +633,7 @@ void wpa_msg(void *ctx, int level, const char *fmt, ...)
 		if (ifname) {
 			int res = os_snprintf(prefix, sizeof(prefix), "%s: ",
 					      ifname);
-			if (res < 0 || res >= (int) sizeof(prefix))
+			if (os_snprintf_error(sizeof(prefix), res))
 				prefix[0] = '\0';
 		}
 	}
