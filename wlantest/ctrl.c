@@ -1,6 +1,6 @@
 /*
  * wlantest control interface
- * Copyright (c) 2010-2013, Jouni Malinen <j@w1.fi>
+ * Copyright (c) 2010-2015, Jouni Malinen <j@w1.fi>
  *
  * This software may be distributed under the terms of the BSD license.
  * See README for more details.
@@ -906,6 +906,15 @@ static void info_print_cipher(char *buf, size_t len, int cipher)
 	if (cipher & WPA_CIPHER_AES_128_CMAC)
 		pos += os_snprintf(pos, end - pos, "%sBIP",
 				   pos == buf ? "" : " ");
+	if (cipher & WPA_CIPHER_BIP_GMAC_128)
+		pos += os_snprintf(pos, end - pos, "%sBIP-GMAC-128",
+				   pos == buf ? "" : " ");
+	if (cipher & WPA_CIPHER_BIP_GMAC_256)
+		pos += os_snprintf(pos, end - pos, "%sBIP-GMAC-256",
+				   pos == buf ? "" : " ");
+	if (cipher & WPA_CIPHER_BIP_CMAC_256)
+		pos += os_snprintf(pos, end - pos, "%sBIP-CMAC-256",
+				   pos == buf ? "" : " ");
 }
 
 
@@ -941,6 +950,12 @@ static void info_print_key_mgmt(char *buf, size_t len, int key_mgmt)
 				   pos == buf ? "" : " ");
 	if (key_mgmt & WPA_KEY_MGMT_PSK_SHA256)
 		pos += os_snprintf(pos, end - pos, "%sPSK-SHA256",
+				   pos == buf ? "" : " ");
+	if (key_mgmt & WPA_KEY_MGMT_IEEE8021X_SUITE_B)
+		pos += os_snprintf(pos, end - pos, "%sEAP-SUITE-B",
+				   pos == buf ? "" : " ");
+	if (key_mgmt & WPA_KEY_MGMT_IEEE8021X_SUITE_B_192)
+		pos += os_snprintf(pos, end - pos, "%sEAP-SUITE-B-192",
 				   pos == buf ? "" : " ");
 }
 

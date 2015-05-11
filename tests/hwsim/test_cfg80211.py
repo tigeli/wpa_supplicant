@@ -12,6 +12,8 @@ import subprocess
 import time
 
 import hostapd
+import hwsim_utils
+from tshark import run_tshark
 from nl80211 import *
 
 def nl80211_command(dev, cmd, attr):
@@ -81,23 +83,61 @@ def test_cfg80211_tx_frame(dev, apdev, params):
     # note: also the Deauthenticate frame sent by the GO going down ends up
     # being transmitted incorrectly on 2422 MHz.
 
-    try:
-        arg = [ "tshark",
-                "-r", os.path.join(params['logdir'], "hwsim0.pcapng"),
-                "-R", "wlan.fc.type_subtype == 13",
-                "-Tfields", "-e", "radiotap.channel.freq" ]
-        cmd = subprocess.Popen(arg, stdout=subprocess.PIPE,
-                               stderr=open('/dev/null', 'w'))
-    except Exception, e:
-        logger.info("Could run run tshark check: " + str(e))
-        cmd = None
-        pass
-
-    if cmd:
-        freq = cmd.stdout.read().splitlines()
+    out = run_tshark(os.path.join(params['logdir'], "hwsim0.pcapng"),
+                     "wlan.fc.type_subtype == 13", ["radiotap.channel.freq"])
+    if out is not None:
+        freq = out.splitlines()
         if len(freq) != 2:
             raise Exception("Unexpected number of Action frames (%d)" % len(freq))
         if freq[0] != "2422":
             raise Exception("First Action frame on unexpected channel: %s MHz" % freq[0])
         if freq[1] != "2412":
             raise Exception("Second Action frame on unexpected channel: %s MHz" % freq[1])
+
+def test_cfg80211_wep_key_idx_change(dev, apdev):
+    """WEP Shared Key authentication and key index change without deauth"""
+    hapd = hostapd.add_ap(apdev[0]['ifname'],
+                          { "ssid": "wep-shared-key",
+                            "wep_key0": '"hello12345678"',
+                            "wep_key1": '"other12345678"',
+                            "auth_algs": "2" })
+    id = dev[0].connect("wep-shared-key", key_mgmt="NONE", auth_alg="SHARED",
+                        wep_key0='"hello12345678"',
+                        wep_key1='"other12345678"',
+                        wep_tx_keyidx="0",
+                        scan_freq="2412")
+    hwsim_utils.test_connectivity(dev[0], hapd)
+
+    dev[0].set_network(id, "wep_tx_keyidx", "1")
+
+    # clear cfg80211 auth state to allow new auth without deauth frame
+    ifindex = int(dev[0].get_driver_status_field("ifindex"))
+    attrs = build_nl80211_attr_u32('IFINDEX', ifindex)
+    attrs += build_nl80211_attr_u16('REASON_CODE', 1)
+    attrs += build_nl80211_attr_mac('MAC', apdev[0]['bssid'])
+    attrs += build_nl80211_attr_flag('LOCAL_STATE_CHANGE')
+    nl80211_command(dev[0], 'DEAUTHENTICATE', attrs)
+    dev[0].wait_disconnected(timeout=5, error="Local-deauth timed out")
+
+    # the previous command results in deauth event followed by auto-reconnect
+    dev[0].wait_connected(timeout=10, error="Reassociation timed out")
+    hwsim_utils.test_connectivity(dev[0], hapd)
+
+def test_cfg80211_hostapd_ext_sta_remove(dev, apdev):
+    """cfg80211 DEL_STATION issued externally to hostapd"""
+    hapd = hostapd.add_ap(apdev[0]['ifname'],
+                          { "ssid": "open" })
+    id = dev[0].connect("open", key_mgmt="NONE", scan_freq="2412")
+
+    ifindex = int(hapd.get_driver_status_field("ifindex"))
+    attrs = build_nl80211_attr_u32('IFINDEX', ifindex)
+    attrs += build_nl80211_attr_u16('REASON_CODE', 1)
+    attrs += build_nl80211_attr_u8('MGMT_SUBTYPE', 12)
+    attrs += build_nl80211_attr_mac('MAC', dev[0].own_addr())
+    nl80211_command(hapd, 'DEL_STATION', attrs)
+
+    # Currently, hostapd ignores the NL80211_CMD_DEL_STATION event if
+    # drv->device_ap_sme == 0 (which is the case with mac80211_hwsim), so no
+    # further action happens here. If that event were to be used to remove the
+    # STA entry from hostapd even in device_ap_sme == 0 case, this test case
+    # could be extended to cover additional operations.

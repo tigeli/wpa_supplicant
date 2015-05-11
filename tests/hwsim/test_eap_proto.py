@@ -13,6 +13,7 @@ import threading
 import time
 
 import hostapd
+from utils import HwsimSkip
 
 EAP_CODE_REQUEST = 1
 EAP_CODE_RESPONSE = 2
@@ -53,7 +54,7 @@ def start_radius_server(eap_handler):
         import pyrad.packet
         import pyrad.dictionary
     except ImportError:
-        return None
+        raise HwsimSkip("No pyrad modules available")
 
     class TestServer(pyrad.server.Server):
         def _HandleAuthPacket(self, pkt):
@@ -65,10 +66,13 @@ def start_radius_server(eap_handler):
             eap_req = self.eap_handler(self.ctx, eap)
             reply = self.CreateReplyPacket(pkt)
             if eap_req:
-                if len(eap_req) > 253:
-                    logger.info("Need to fragment EAP-Message")
-                    # TODO: fragment
-                reply.AddAttribute("EAP-Message", eap_req)
+                while True:
+                    if len(eap_req) > 253:
+                        reply.AddAttribute("EAP-Message", eap_req[0:253])
+                        eap_req = eap_req[253:]
+                    else:
+                        reply.AddAttribute("EAP-Message", eap_req)
+                        break
             else:
                 logger.info("No EAP request available")
             reply.code = pyrad.packet.AccessChallenge
@@ -257,8 +261,6 @@ def test_eap_proto(dev, apdev):
         return None
 
     srv = start_radius_server(eap_handler)
-    if srv is None:
-        return "skip"
 
     try:
         hapd = start_ap(apdev[0]['ifname'])
@@ -525,8 +527,6 @@ def test_eap_proto_sake(dev, apdev):
         return sake_challenge(ctx)
 
     srv = start_radius_server(sake_handler)
-    if srv is None:
-        return "skip"
 
     try:
         hapd = start_ap(apdev[0]['ifname'])
@@ -701,8 +701,6 @@ def test_eap_proto_leap(dev, apdev):
         return None
 
     srv = start_radius_server(leap_handler)
-    if srv is None:
-        return "skip"
 
     try:
         hapd = start_ap(apdev[0]['ifname'])
@@ -763,8 +761,6 @@ def test_eap_proto_md5(dev, apdev):
         return None
 
     srv = start_radius_server(md5_handler)
-    if srv is None:
-        return "skip"
 
     try:
         hapd = start_ap(apdev[0]['ifname'])
@@ -816,8 +812,6 @@ def test_eap_proto_otp(dev, apdev):
         return None
 
     srv = start_radius_server(otp_handler)
-    if srv is None:
-        return "skip"
 
     try:
         hapd = start_ap(apdev[0]['ifname'])
@@ -1271,8 +1265,6 @@ def test_eap_proto_gpsk(dev, apdev):
         return None
 
     srv = start_radius_server(gpsk_handler)
-    if srv is None:
-        return "skip"
 
     try:
         hapd = start_ap(apdev[0]['ifname'])
@@ -1579,8 +1571,6 @@ def test_eap_proto_eke(dev, apdev):
         return None
 
     srv = start_radius_server(eke_handler)
-    if srv is None:
-        return "skip"
 
     try:
         hapd = start_ap(apdev[0]['ifname'])
@@ -1901,8 +1891,6 @@ def test_eap_proto_pax(dev, apdev):
             return struct.pack(">BBH", EAP_CODE_FAILURE, ctx['id'], 4)
 
     srv = start_radius_server(pax_handler)
-    if srv is None:
-        return "skip"
 
     try:
         hapd = start_ap(apdev[0]['ifname'])
@@ -2040,8 +2028,6 @@ def test_eap_proto_psk(dev, apdev):
         return None
 
     srv = start_radius_server(psk_handler)
-    if srv is None:
-        return "skip"
 
     try:
         hapd = start_ap(apdev[0]['ifname'])
@@ -2783,8 +2769,6 @@ def test_eap_proto_aka(dev, apdev):
         return None
 
     srv = start_radius_server(aka_handler)
-    if srv is None:
-        return "skip"
 
     try:
         hapd = start_ap(apdev[0]['ifname'])
@@ -3130,8 +3114,6 @@ def test_eap_proto_aka_prime(dev, apdev):
         return None
 
     srv = start_radius_server(aka_prime_handler)
-    if srv is None:
-        return "skip"
 
     try:
         hapd = start_ap(apdev[0]['ifname'])
@@ -3536,8 +3518,6 @@ def test_eap_proto_sim(dev, apdev):
         return None
 
     srv = start_radius_server(sim_handler)
-    if srv is None:
-        return "skip"
 
     try:
         hapd = start_ap(apdev[0]['ifname'])
@@ -3558,6 +3538,467 @@ def test_eap_proto_sim(dev, apdev):
                                        timeout=10)
                 if ev is None:
                     raise Exception("Timeout on EAP failure")
+            dev[0].request("REMOVE_NETWORK all")
+    finally:
+        stop_radius_server(srv)
+
+def test_eap_proto_ikev2(dev, apdev):
+    """EAP-IKEv2 protocol tests"""
+    def ikev2_handler(ctx, req):
+        logger.info("ikev2_handler - RX " + req.encode("hex"))
+        if 'num' not in ctx:
+            ctx['num'] = 0
+        ctx['num'] = ctx['num'] + 1
+        if 'id' not in ctx:
+            ctx['id'] = 1
+        ctx['id'] = (ctx['id'] + 1) % 256
+
+        idx = 0
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Missing payload")
+            return struct.pack(">BBHB", EAP_CODE_REQUEST, ctx['id'],
+                               4 + 1,
+                               EAP_TYPE_IKEV2)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Truncated Message Length field")
+            return struct.pack(">BBHBB3B", EAP_CODE_REQUEST, ctx['id'],
+                               4 + 1 + 1 + 3,
+                               EAP_TYPE_IKEV2, 0x80, 0, 0, 0)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Too short Message Length value")
+            return struct.pack(">BBHBBLB", EAP_CODE_REQUEST, ctx['id'],
+                               4 + 1 + 1 + 4 + 1,
+                               EAP_TYPE_IKEV2, 0x80, 0, 1)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Truncated message")
+            return struct.pack(">BBHBBL", EAP_CODE_REQUEST, ctx['id'],
+                               4 + 1 + 1 + 4,
+                               EAP_TYPE_IKEV2, 0x80, 1)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Truncated message(2)")
+            return struct.pack(">BBHBBL", EAP_CODE_REQUEST, ctx['id'],
+                               4 + 1 + 1 + 4,
+                               EAP_TYPE_IKEV2, 0x80, 0xffffffff)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Truncated message(3)")
+            return struct.pack(">BBHBBL", EAP_CODE_REQUEST, ctx['id'],
+                               4 + 1 + 1 + 4,
+                               EAP_TYPE_IKEV2, 0xc0, 0xffffffff)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Truncated message(4)")
+            return struct.pack(">BBHBBL", EAP_CODE_REQUEST, ctx['id'],
+                               4 + 1 + 1 + 4,
+                               EAP_TYPE_IKEV2, 0xc0, 10000000)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Too long fragments (first fragment)")
+            return struct.pack(">BBHBBLB", EAP_CODE_REQUEST, ctx['id'],
+                               4 + 1 + 1 + 4 + 1,
+                               EAP_TYPE_IKEV2, 0xc0, 2, 1)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Too long fragments (second fragment)")
+            return struct.pack(">BBHBB2B", EAP_CODE_REQUEST, ctx['id'],
+                               4 + 1 + 1 + 2,
+                               EAP_TYPE_IKEV2, 0x00, 2, 3)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: No Message Length field in first fragment")
+            return struct.pack(">BBHBBB", EAP_CODE_REQUEST, ctx['id'],
+                               4 + 1 + 1 + 1,
+                               EAP_TYPE_IKEV2, 0x40, 1)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: ICV before keys")
+            return struct.pack(">BBHBB", EAP_CODE_REQUEST, ctx['id'],
+                               4 + 1 + 1,
+                               EAP_TYPE_IKEV2, 0x20)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Unsupported IKEv2 header version")
+            return struct.pack(">BBHBB2L2LBBBBLL", EAP_CODE_REQUEST, ctx['id'],
+                               4 + 1 + 1 + 28,
+                               EAP_TYPE_IKEV2, 0x00,
+                               0, 0, 0, 0,
+                               0, 0, 0, 0, 0, 0)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Incorrect IKEv2 header Length")
+            return struct.pack(">BBHBB2L2LBBBBLL", EAP_CODE_REQUEST, ctx['id'],
+                               4 + 1 + 1 + 28,
+                               EAP_TYPE_IKEV2, 0x00,
+                               0, 0, 0, 0,
+                               0, 0x20, 0, 0, 0, 0)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Unexpected IKEv2 Exchange Type in SA_INIT state")
+            return struct.pack(">BBHBB2L2LBBBBLL", EAP_CODE_REQUEST, ctx['id'],
+                               4 + 1 + 1 + 28,
+                               EAP_TYPE_IKEV2, 0x00,
+                               0, 0, 0, 0,
+                               0, 0x20, 0, 0, 0, 28)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Unexpected IKEv2 Message ID in SA_INIT state")
+            return struct.pack(">BBHBB2L2LBBBBLL", EAP_CODE_REQUEST, ctx['id'],
+                               4 + 1 + 1 + 28,
+                               EAP_TYPE_IKEV2, 0x00,
+                               0, 0, 0, 0,
+                               0, 0x20, 34, 0, 1, 28)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Unexpected IKEv2 Flags value")
+            return struct.pack(">BBHBB2L2LBBBBLL", EAP_CODE_REQUEST, ctx['id'],
+                               4 + 1 + 1 + 28,
+                               EAP_TYPE_IKEV2, 0x00,
+                               0, 0, 0, 0,
+                               0, 0x20, 34, 0, 0, 28)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Unexpected IKEv2 Flags value(2)")
+            return struct.pack(">BBHBB2L2LBBBBLL", EAP_CODE_REQUEST, ctx['id'],
+                               4 + 1 + 1 + 28,
+                               EAP_TYPE_IKEV2, 0x00,
+                               0, 0, 0, 0,
+                               0, 0x20, 34, 0x20, 0, 28)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: No SAi1 in SA_INIT")
+            return struct.pack(">BBHBB2L2LBBBBLL", EAP_CODE_REQUEST, ctx['id'],
+                               4 + 1 + 1 + 28,
+                               EAP_TYPE_IKEV2, 0x00,
+                               0, 0, 0, 0,
+                               0, 0x20, 34, 0x08, 0, 28)
+
+        def build_ike(id, next=0, exch_type=34, flags=0x00, ike=''):
+            return struct.pack(">BBHBB2L2LBBBBLL", EAP_CODE_REQUEST, id,
+                               4 + 1 + 1 + 28 + len(ike),
+                               EAP_TYPE_IKEV2, flags,
+                               0, 0, 0, 0,
+                               next, 0x20, exch_type, 0x08, 0,
+                               28 + len(ike)) + ike
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Unexpected extra data after payloads")
+            return build_ike(ctx['id'], ike=struct.pack(">B", 1))
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Truncated payload header")
+            return build_ike(ctx['id'], next=128, ike=struct.pack(">B", 1))
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Too small payload header length")
+            ike = struct.pack(">BBH", 0, 0, 3)
+            return build_ike(ctx['id'], next=128, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Too large payload header length")
+            ike = struct.pack(">BBH", 0, 0, 5)
+            return build_ike(ctx['id'], next=128, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Unsupported payload (non-critical and critical)")
+            ike = struct.pack(">BBHBBH", 129, 0, 4, 0, 0x01, 4)
+            return build_ike(ctx['id'], next=128, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Certificate and empty SAi1")
+            ike = struct.pack(">BBHBBH", 33, 0, 4, 0, 0, 4)
+            return build_ike(ctx['id'], next=37, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Too short proposal")
+            ike = struct.pack(">BBHBBHBBB", 0, 0, 4 + 7,
+                              0, 0, 7, 0, 0, 0)
+            return build_ike(ctx['id'], next=33, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Too small proposal length in SAi1")
+            ike = struct.pack(">BBHBBHBBBB", 0, 0, 4 + 8,
+                              0, 0, 7, 0, 0, 0, 0)
+            return build_ike(ctx['id'], next=33, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Too large proposal length in SAi1")
+            ike = struct.pack(">BBHBBHBBBB", 0, 0, 4 + 8,
+                              0, 0, 9, 0, 0, 0, 0)
+            return build_ike(ctx['id'], next=33, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Unexpected proposal type in SAi1")
+            ike = struct.pack(">BBHBBHBBBB", 0, 0, 4 + 8,
+                              1, 0, 8, 0, 0, 0, 0)
+            return build_ike(ctx['id'], next=33, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Unexpected Protocol ID in SAi1")
+            ike = struct.pack(">BBHBBHBBBB", 0, 0, 4 + 8,
+                              0, 0, 8, 0, 0, 0, 0)
+            return build_ike(ctx['id'], next=33, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Unexpected proposal number in SAi1")
+            ike = struct.pack(">BBHBBHBBBB", 0, 0, 4 + 8,
+                              0, 0, 8, 0, 1, 0, 0)
+            return build_ike(ctx['id'], next=33, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Not enough room for SPI in SAi1")
+            ike = struct.pack(">BBHBBHBBBB", 0, 0, 4 + 8,
+                              0, 0, 8, 1, 1, 1, 0)
+            return build_ike(ctx['id'], next=33, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Unexpected SPI in SAi1")
+            ike = struct.pack(">BBHBBHBBBBB", 0, 0, 4 + 9,
+                              0, 0, 9, 1, 1, 1, 0, 1)
+            return build_ike(ctx['id'], next=33, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: No transforms in SAi1")
+            ike = struct.pack(">BBHBBHBBBB", 0, 0, 4 + 8,
+                              0, 0, 8, 1, 1, 0, 0)
+            return build_ike(ctx['id'], next=33, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Too short transform in SAi1")
+            ike = struct.pack(">BBHBBHBBBB", 0, 0, 4 + 8,
+                              0, 0, 8, 1, 1, 0, 1)
+            return build_ike(ctx['id'], next=33, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Too small transform length in SAi1")
+            ike = struct.pack(">BBHBBHBBBBBBHBBH", 0, 0, 4 + 8 + 8,
+                              0, 0, 8 + 8, 1, 1, 0, 1,
+                              0, 0, 7, 0, 0, 0)
+            return build_ike(ctx['id'], next=33, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Too large transform length in SAi1")
+            ike = struct.pack(">BBHBBHBBBBBBHBBH", 0, 0, 4 + 8 + 8,
+                              0, 0, 8 + 8, 1, 1, 0, 1,
+                              0, 0, 9, 0, 0, 0)
+            return build_ike(ctx['id'], next=33, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Unexpected Transform type in SAi1")
+            ike = struct.pack(">BBHBBHBBBBBBHBBH", 0, 0, 4 + 8 + 8,
+                              0, 0, 8 + 8, 1, 1, 0, 1,
+                              1, 0, 8, 0, 0, 0)
+            return build_ike(ctx['id'], next=33, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: No transform attributes in SAi1")
+            ike = struct.pack(">BBHBBHBBBBBBHBBH", 0, 0, 4 + 8 + 8,
+                              0, 0, 8 + 8, 1, 1, 0, 1,
+                              0, 0, 8, 0, 0, 0)
+            return build_ike(ctx['id'], next=33, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: No transform attr for AES and unexpected data after transforms in SAi1")
+            tlen1 = 8 + 3
+            tlen2 = 8 + 4
+            tlen3 = 8 + 4
+            tlen = tlen1 + tlen2 + tlen3
+            ike = struct.pack(">BBHBBHBBBBBBHBBH3BBBHBBHHHBBHBBHHHB",
+                              0, 0, 4 + 8 + tlen + 1,
+                              0, 0, 8 + tlen + 1, 1, 1, 0, 3,
+                              3, 0, tlen1, 1, 0, 12, 1, 2, 3,
+                              3, 0, tlen2, 1, 0, 12, 0, 128,
+                              0, 0, tlen3, 1, 0, 12, 0x8000 | 14, 127,
+                              1)
+            return build_ike(ctx['id'], next=33, ike=ike)
+
+        def build_sa(next=0):
+            tlen = 5 * 8
+            return struct.pack(">BBHBBHBBBBBBHBBHBBHBBHBBHBBHBBHBBHBBHBBH",
+                               next, 0, 4 + 8 + tlen,
+                               0, 0, 8 + tlen, 1, 1, 0, 5,
+                               3, 0, 8, 1, 0, 3,
+                               3, 0, 8, 2, 0, 1,
+                               3, 0, 8, 3, 0, 1,
+                               3, 0, 8, 4, 0, 5,
+                               0, 0, 8, 241, 0, 0)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Valid proposal, but no KEi in SAi1")
+            ike = build_sa()
+            return build_ike(ctx['id'], next=33, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Empty KEi in SAi1")
+            ike = build_sa(next=34) + struct.pack(">BBH", 0, 0, 4)
+            return build_ike(ctx['id'], next=33, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Mismatch in DH Group in SAi1")
+            ike = build_sa(next=34)
+            ike += struct.pack(">BBHHH", 0, 0, 4 + 4 + 96, 12345, 0)
+            ike += 96*'\x00'
+            return build_ike(ctx['id'], next=33, ike=ike)
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: EAP-Failure")
+            return struct.pack(">BBH", EAP_CODE_FAILURE, ctx['id'], 4)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Invalid DH public value length in SAi1")
+            ike = build_sa(next=34)
+            ike += struct.pack(">BBHHH", 0, 0, 4 + 4 + 96, 5, 0)
+            ike += 96*'\x00'
+            return build_ike(ctx['id'], next=33, ike=ike)
+
+        def build_ke(next=0):
+            ke = struct.pack(">BBHHH", next, 0, 4 + 4 + 192, 5, 0)
+            ke += 192*'\x00'
+            return ke
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Valid proposal and KEi, but no Ni in SAi1")
+            ike = build_sa(next=34)
+            ike += build_ke()
+            return build_ike(ctx['id'], next=33, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Too short Ni in SAi1")
+            ike = build_sa(next=34)
+            ike += build_ke(next=40)
+            ike += struct.pack(">BBH", 0, 0, 4)
+            return build_ike(ctx['id'], next=33, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Too long Ni in SAi1")
+            ike = build_sa(next=34)
+            ike += build_ke(next=40)
+            ike += struct.pack(">BBH", 0, 0, 4 + 257) + 257*'\x00'
+            return build_ike(ctx['id'], next=33, ike=ike)
+
+        def build_ni(next=0):
+            return struct.pack(">BBH", next, 0, 4 + 256) + 256*'\x00'
+
+        def build_sai1(id):
+            ike = build_sa(next=34)
+            ike += build_ke(next=40)
+            ike += build_ni()
+            return build_ike(ctx['id'], next=33, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Valid proposal, KEi, and Ni in SAi1")
+            return build_sai1(ctx['id'])
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: EAP-Failure")
+            return struct.pack(">BBH", EAP_CODE_FAILURE, ctx['id'], 4)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Valid proposal, KEi, and Ni in SAi1")
+            return build_sai1(ctx['id'])
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: No integrity checksum")
+            ike = ''
+            return build_ike(ctx['id'], next=37, ike=ike)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Valid proposal, KEi, and Ni in SAi1")
+            return build_sai1(ctx['id'])
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Truncated integrity checksum")
+            return struct.pack(">BBHBB",
+                               EAP_CODE_REQUEST, ctx['id'],
+                               4 + 1 + 1,
+                               EAP_TYPE_IKEV2, 0x20)
+
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Valid proposal, KEi, and Ni in SAi1")
+            return build_sai1(ctx['id'])
+        idx += 1
+        if ctx['num'] == idx:
+            logger.info("Test: Invalid integrity checksum")
+            ike = ''
+            return build_ike(ctx['id'], next=37, flags=0x20, ike=ike)
+
+        return None
+
+    srv = start_radius_server(ikev2_handler)
+
+    try:
+        hapd = start_ap(apdev[0]['ifname'])
+
+        for i in range(49):
+            dev[0].connect("eap-test", key_mgmt="WPA-EAP", scan_freq="2412",
+                           eap="IKEV2", identity="user",
+                           password="password",
+                           wait_connect=False)
+            ev = dev[0].wait_event(["CTRL-EVENT-EAP-PROPOSED-METHOD"],
+                                   timeout=15)
+            if ev is None:
+                raise Exception("Timeout on EAP start")
+            if i in [ 40, 45 ]:
+                ev = dev[0].wait_event(["CTRL-EVENT-EAP-FAILURE"],
+                                       timeout=10)
+                if ev is None:
+                    raise Exception("Timeout on EAP failure")
+            else:
+                time.sleep(0.05)
             dev[0].request("REMOVE_NETWORK all")
     finally:
         stop_radius_server(srv)

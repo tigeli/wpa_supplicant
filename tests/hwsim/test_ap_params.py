@@ -18,9 +18,9 @@ def test_ap_fragmentation_rts_set_high(dev, apdev):
     params = hostapd.wpa2_params(ssid=ssid, passphrase=passphrase)
     params['rts_threshold'] = "1000"
     params['fragm_threshold'] = "2000"
-    hostapd.add_ap(apdev[0]['ifname'], params)
+    hapd = hostapd.add_ap(apdev[0]['ifname'], params)
     dev[0].connect(ssid, psk=passphrase, scan_freq="2412")
-    hwsim_utils.test_connectivity(dev[0].ifname, apdev[0]['ifname'])
+    hwsim_utils.test_connectivity(dev[0], hapd)
 
 def test_ap_fragmentation_open(dev, apdev):
     """Open AP with fragmentation threshold"""
@@ -28,9 +28,9 @@ def test_ap_fragmentation_open(dev, apdev):
     params = {}
     params['ssid'] = ssid
     params['fragm_threshold'] = "1000"
-    hostapd.add_ap(apdev[0]['ifname'], params)
+    hapd = hostapd.add_ap(apdev[0]['ifname'], params)
     dev[0].connect(ssid, key_mgmt="NONE", scan_freq="2412")
-    hwsim_utils.test_connectivity(dev[0].ifname, apdev[0]['ifname'])
+    hwsim_utils.test_connectivity(dev[0], hapd)
 
 def test_ap_fragmentation_wpa2(dev, apdev):
     """WPA2-PSK AP with fragmentation threshold"""
@@ -38,9 +38,9 @@ def test_ap_fragmentation_wpa2(dev, apdev):
     passphrase = 'qwertyuiop'
     params = hostapd.wpa2_params(ssid=ssid, passphrase=passphrase)
     params['fragm_threshold'] = "1000"
-    hostapd.add_ap(apdev[0]['ifname'], params)
+    hapd = hostapd.add_ap(apdev[0]['ifname'], params)
     dev[0].connect(ssid, psk=passphrase, scan_freq="2412")
-    hwsim_utils.test_connectivity(dev[0].ifname, apdev[0]['ifname'])
+    hwsim_utils.test_connectivity(dev[0], hapd)
 
 def test_ap_vendor_elements(dev, apdev):
     """WPA2-PSK AP with vendor elements added"""
@@ -58,6 +58,7 @@ def test_ap_vendor_elements(dev, apdev):
 def test_ap_country(dev, apdev):
     """WPA2-PSK AP setting country code and using 5 GHz band"""
     try:
+        hapd = None
         bssid = apdev[0]['bssid']
         ssid = "test-wpa2-psk"
         passphrase = 'qwertyuiop'
@@ -66,11 +67,15 @@ def test_ap_country(dev, apdev):
         params['ieee80211d'] = '1'
         params['hw_mode'] = 'a'
         params['channel'] = '36'
-        hostapd.add_ap(apdev[0]['ifname'], params)
+        hapd = hostapd.add_ap(apdev[0]['ifname'], params)
         dev[0].connect(ssid, psk=passphrase, scan_freq="5180")
-        hwsim_utils.test_connectivity(dev[0].ifname, apdev[0]['ifname'])
+        hwsim_utils.test_connectivity(dev[0], hapd)
     finally:
-        subprocess.call(['sudo', 'iw', 'reg', 'set', '00'])
+        dev[0].request("DISCONNECT")
+        if hapd:
+            hapd.request("DISABLE")
+        subprocess.call(['iw', 'reg', 'set', '00'])
+        dev[0].flush_scan_cache()
 
 def test_ap_acl_accept(dev, apdev):
     """MAC ACL accept list"""
@@ -115,19 +120,20 @@ def test_ap_wds_sta(dev, apdev):
     params = hostapd.wpa2_params(ssid=ssid, passphrase=passphrase)
     params['wds_sta'] = "1"
     params['wds_bridge'] = "wds-br0"
-    hostapd.add_ap(apdev[0]['ifname'], params)
+    hapd = hostapd.add_ap(apdev[0]['ifname'], params)
 
     try:
-        subprocess.call(['sudo', 'brctl', 'addbr', 'wds-br0'])
-        subprocess.call(['sudo', 'brctl', 'setfd', 'wds-br0', '0'])
-        subprocess.call(['sudo', 'ip', 'link', 'set', 'dev', 'wds-br0', 'up'])
-        subprocess.call(['sudo', 'iw', dev[0].ifname, 'set', '4addr', 'on'])
+        subprocess.call(['brctl', 'addbr', 'wds-br0'])
+        subprocess.call(['brctl', 'setfd', 'wds-br0', '0'])
+        subprocess.call(['ip', 'link', 'set', 'dev', 'wds-br0', 'up'])
+        subprocess.call(['iw', dev[0].ifname, 'set', '4addr', 'on'])
         dev[0].connect(ssid, psk=passphrase, scan_freq="2412")
-        hwsim_utils.test_connectivity(dev[0].ifname, "wds-br0", max_tries=15)
+        hwsim_utils.test_connectivity_iface(dev[0], hapd, "wds-br0",
+                                            max_tries=15)
     finally:
-        subprocess.call(['sudo', 'iw', dev[0].ifname, 'set', '4addr', 'off'])
-        subprocess.call(['sudo', 'ip', 'link', 'set', 'dev', 'wds-br0', 'down'])
-        subprocess.call(['sudo', 'brctl', 'delbr', 'wds-br0'])
+        subprocess.call(['iw', dev[0].ifname, 'set', '4addr', 'off'])
+        subprocess.call(['ip', 'link', 'set', 'dev', 'wds-br0', 'down'])
+        subprocess.call(['brctl', 'delbr', 'wds-br0'])
 
 def test_ap_inactivity_poll(dev, apdev):
     """AP using inactivity poll"""
@@ -196,10 +202,15 @@ def test_ap_spectrum_management_required(dev, apdev):
     params["local_pwr_constraint"] = "3"
     params['spectrum_mgmt_required'] = "1"
     try:
-        hostapd.add_ap(apdev[0]['ifname'], params)
+        hapd = None
+        hapd = hostapd.add_ap(apdev[0]['ifname'], params)
         dev[0].connect(ssid, key_mgmt="NONE", scan_freq="5180")
     finally:
-        subprocess.call(['sudo', 'iw', 'reg', 'set', '00'])
+        dev[0].request("DISCONNECT")
+        if hapd:
+            hapd.request("DISABLE")
+        subprocess.call(['iw', 'reg', 'set', '00'])
+        dev[0].flush_scan_cache()
 
 def test_ap_max_listen_interval(dev, apdev):
     """Open AP with maximum listen interval limit"""
@@ -241,6 +252,6 @@ def test_ap_tx_queue_params(dev, apdev):
     params['tx_queue_data1_cwmin'] = "7"
     params['tx_queue_data1_cwmax'] = "1023"
     params['tx_queue_data1_burst'] = "2"
-    hostapd.add_ap(apdev[0]['ifname'], params)
+    hapd = hostapd.add_ap(apdev[0]['ifname'], params)
     dev[0].connect(ssid, key_mgmt="NONE", scan_freq="2412")
-    hwsim_utils.test_connectivity(dev[0].ifname, apdev[0]['ifname'])
+    hwsim_utils.test_connectivity(dev[0], hapd)

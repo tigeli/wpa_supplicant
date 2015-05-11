@@ -24,7 +24,38 @@ def test_connect_cmd_open(dev, apdev):
 
     wpas = WpaSupplicant(global_iface='/tmp/wpas-wlan5')
     wpas.interface_add("wlan5", drv_params="force_connect_cmd=1")
-    wpas.connect("sta-connect", key_mgmt="NONE", scan_freq="2412")
+    wpas.connect("sta-connect", key_mgmt="NONE", scan_freq="2412",
+                 bg_scan_period="1")
+    wpas.request("DISCONNECT")
+
+def test_connect_cmd_wep(dev, apdev):
+    """WEP Open System using cfg80211 connect command"""
+    params = { "ssid": "sta-connect-wep", "wep_key0": '"hello"' }
+    hapd = hostapd.add_ap(apdev[0]['ifname'], params)
+
+    wpas = WpaSupplicant(global_iface='/tmp/wpas-wlan5')
+    wpas.interface_add("wlan5", drv_params="force_connect_cmd=1")
+    wpas.connect("sta-connect-wep", key_mgmt="NONE", scan_freq="2412",
+                 wep_key0='"hello"')
+    hwsim_utils.test_connectivity(wpas, hapd)
+    wpas.request("DISCONNECT")
+
+def test_connect_cmd_wep_shared(dev, apdev):
+    """WEP Shared key using cfg80211 connect command"""
+    params = { "ssid": "sta-connect-wep", "wep_key0": '"hello"',
+               "auth_algs": "2" }
+    hapd = hostapd.add_ap(apdev[0]['ifname'], params)
+
+    wpas = WpaSupplicant(global_iface='/tmp/wpas-wlan5')
+    wpas.interface_add("wlan5", drv_params="force_connect_cmd=1")
+    id = wpas.connect("sta-connect-wep", key_mgmt="NONE", scan_freq="2412",
+                      auth_alg="SHARED", wep_key0='"hello"')
+    hwsim_utils.test_connectivity(wpas, hapd)
+    wpas.request("DISCONNECT")
+    wpas.remove_network(id)
+    wpas.connect("sta-connect-wep", key_mgmt="NONE", scan_freq="2412",
+                 auth_alg="OPEN SHARED", wep_key0='"hello"')
+    hwsim_utils.test_connectivity(wpas, hapd)
     wpas.request("DISCONNECT")
 
 def test_connect_cmd_p2p_management(dev, apdev):
@@ -52,7 +83,7 @@ def test_connect_cmd_wpa2_psk(dev, apdev):
 def test_connect_cmd_concurrent_grpform_while_connecting(dev, apdev):
     """Concurrent P2P group formation while connecting to an AP using cfg80211 connect command"""
     logger.info("Start connection to an infrastructure AP")
-    hostapd.add_ap(apdev[0]['ifname'], { "ssid": "test-open" })
+    hapd = hostapd.add_ap(apdev[0]['ifname'], { "ssid": "test-open" })
 
     wpas = WpaSupplicant(global_iface='/tmp/wpas-wlan5')
     wpas.interface_add("wlan5", drv_params="force_connect_cmd=1")
@@ -67,7 +98,7 @@ def test_connect_cmd_concurrent_grpform_while_connecting(dev, apdev):
     remove_group(dev[0], wpas)
 
     logger.info("Confirm AP connection after P2P group removal")
-    hwsim_utils.test_connectivity(wpas.ifname, apdev[0]['ifname'])
+    hwsim_utils.test_connectivity(wpas, hapd)
 
 def test_connect_cmd_reject_assoc(dev, apdev):
     """Connection using cfg80211 connect command getting rejected"""
