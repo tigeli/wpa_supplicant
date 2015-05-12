@@ -11,6 +11,7 @@ import time
 
 import hostapd
 from wpasupplicant import WpaSupplicant
+from utils import alloc_fail
 
 def test_wpas_ctrl_network(dev):
     """wpa_supplicant ctrl_iface network set/get"""
@@ -198,6 +199,49 @@ def test_wpas_ctrl_network(dev):
         raise Exception("Unexpected BSSID success")
     if "FAIL" not in dev[0].request('BSSID ' + str(id) + ' 00:11:22:33:44'):
         raise Exception("Unexpected BSSID success")
+    if "FAIL" not in dev[0].request('BSSID ' + str(id)):
+        raise Exception("Unexpected BSSID success")
+
+    tests = [ "02:11:22:33:44:55",
+              "02:11:22:33:44:55 02:ae:be:ce:53:77",
+              "02:11:22:33:44:55/ff:00:ff:00:ff:00",
+              "02:11:22:33:44:55/ff:00:ff:00:ff:00 f2:99:88:77:66:55",
+              "f2:99:88:77:66:55 02:11:22:33:44:55/ff:00:ff:00:ff:00",
+              "f2:99:88:77:66:55 02:11:22:33:44:55/ff:00:ff:00:ff:00 12:34:56:78:90:ab",
+              "02:11:22:33:44:55/ff:ff:ff:00:00:00 02:ae:be:ce:53:77/00:00:00:00:00:ff" ]
+    for val in tests:
+        dev[0].set_network(id, "bssid_blacklist", val)
+        res = dev[0].get_network(id, "bssid_blacklist")
+        if res != val:
+            raise Exception("Unexpected bssid_blacklist value: %s != %s" % (res, val))
+        dev[0].set_network(id, "bssid_whitelist", val)
+        res = dev[0].get_network(id, "bssid_whitelist")
+        if res != val:
+            raise Exception("Unexpected bssid_whitelist value: %s != %s" % (res, val))
+
+    tests = [ "foo",
+              "00:11:22:33:44:5",
+              "00:11:22:33:44:55q",
+              "00:11:22:33:44:55/",
+              "00:11:22:33:44:55/66:77:88:99:aa:b" ]
+    for val in tests:
+        if "FAIL" not in dev[0].request("SET_NETWORK %d bssid_blacklist %s" % (id, val)):
+            raise Exception("Invalid bssid_blacklist value accepted")
+
+def test_wpas_ctrl_many_networks(dev, apdev):
+    """wpa_supplicant ctrl_iface LIST_NETWORKS with huge number of networks"""
+    for i in range(1000):
+        id = dev[0].add_network()
+    res = dev[0].request("LIST_NETWORKS")
+    if str(id) in res:
+        raise Exception("Last added network was unexpectedly included")
+    res = dev[0].request("LIST_NETWORKS LAST_ID=%d" % (id - 2))
+    if str(id) not in res:
+        raise Exception("Last added network was not present when using LAST_ID")
+    # This command can take a very long time under valgrind testing on a low
+    # power CPU, so increase the command timeout significantly to avoid issues
+    # with the test case failing and following reset operation timing out.
+    dev[0].request("REMOVE_NETWORK all", timeout=60)
 
 def test_wpas_ctrl_dup_network(dev, apdev):
     """wpa_supplicant ctrl_iface DUP_NETWORK"""
@@ -215,6 +259,22 @@ def test_wpas_ctrl_dup_network(dev, apdev):
         if "OK" not in res:
             raise Exception("DUP_NETWORK failed")
     dev[0].connect_network(id)
+
+    if "FAIL" not in dev[0].request("DUP_NETWORK "):
+        raise Exception("Unexpected DUP_NETWORK success")
+    if "FAIL" not in dev[0].request("DUP_NETWORK %d " % id):
+        raise Exception("Unexpected DUP_NETWORK success")
+    if "FAIL" not in dev[0].request("DUP_NETWORK %d %d" % (id, id)):
+        raise Exception("Unexpected DUP_NETWORK success")
+    if "FAIL" not in dev[0].request("DUP_NETWORK 123456 1234567 "):
+        raise Exception("Unexpected DUP_NETWORK success")
+    if "FAIL" not in dev[0].request("DUP_NETWORK %d 123456 " % id):
+        raise Exception("Unexpected DUP_NETWORK success")
+    if "FAIL" not in dev[0].request("DUP_NETWORK %d %d foo" % (id, id)):
+        raise Exception("Unexpected DUP_NETWORK success")
+    dev[0].request("DISCONNECT")
+    if "OK" not in dev[0].request("DUP_NETWORK %d %d ssid" % (id, id)):
+        raise Exception("Unexpected DUP_NETWORK failure")
 
 def add_cred(dev):
     id = dev.add_cred()
@@ -467,6 +527,18 @@ def test_wpas_ctrl_tdls_discover(dev):
     if "FAIL" not in dev[0].request("TDLS_DISCOVER 00:11:22:33:44:55"):
         raise Exception("Unexpected success on TDLS_DISCOVER")
 
+def test_wpas_ctrl_tdls_chan_switch(dev):
+    """wpa_supplicant ctrl_iface tdls_chan_switch error cases"""
+    for args in [ '', '00:11:22:33:44:55' ]:
+        if "FAIL" not in dev[0].request("TDLS_CANCEL_CHAN_SWITCH " + args):
+            raise Exception("Unexpected success on invalid TDLS_CANCEL_CHAN_SWITCH: " + args)
+
+    for args in [ '', 'foo ', '00:11:22:33:44:55 ', '00:11:22:33:44:55 q',
+                  '00:11:22:33:44:55 81', '00:11:22:33:44:55 81 1234',
+                  '00:11:22:33:44:55 81 1234 center_freq1=234 center_freq2=345 bandwidth=456 sec_channel_offset=567 ht vht' ]:
+        if "FAIL" not in dev[0].request("TDLS_CHAN_SWITCH " + args):
+            raise Exception("Unexpected success on invalid TDLS_CHAN_SWITCH: " + args)
+
 def test_wpas_ctrl_addr(dev):
     """wpa_supplicant ctrl_iface invalid address"""
     if "FAIL" not in dev[0].request("TDLS_SETUP "):
@@ -528,6 +600,13 @@ def test_wpas_ctrl_wps_errors(dev):
         raise Exception("Unexpected success on invalid WPS_ER_NFC_CONFIG_TOKEN")
     if "FAIL" not in dev[0].request("WPS_ER_NFC_CONFIG_TOKEN NDEF 00:11:22:33:44:55"):
         raise Exception("Unexpected success on invalid WPS_ER_NFC_CONFIG_TOKEN")
+
+    if "FAIL" not in dev[0].request("WPS_NFC_CONFIG_TOKEN FOO"):
+        raise Exception("Unexpected success on invalid WPS_NFC_CONFIG_TOKEN")
+    if "FAIL" not in dev[0].request("WPS_NFC_CONFIG_TOKEN WPS FOO"):
+        raise Exception("Unexpected success on invalid WPS_NFC_CONFIG_TOKEN")
+    if "FAIL" not in dev[0].request("WPS_NFC_TOKEN FOO"):
+        raise Exception("Unexpected success on invalid WPS_NFC_TOKEN")
 
 def test_wpas_ctrl_config_parser(dev):
     """wpa_supplicant ctrl_iface SET config parser"""
@@ -633,26 +712,28 @@ def test_wpas_ctrl_disallow_aps(dev, apdev):
 
     dev[0].connect("test", key_mgmt="NONE", scan_freq="2412")
     hostapd.add_ap(apdev[1]['ifname'], params)
+    dev[0].scan_for_bss(apdev[1]['bssid'], freq="2412")
     dev[0].dump_monitor()
     if "OK" not in dev[0].request("SET disallow_aps bssid 00:11:22:33:44:55 bssid 00:22:33:44:55:66"):
         raise Exception("Failed to set disallow_aps")
     if "OK" not in dev[0].request("SET disallow_aps bssid " + apdev[0]['bssid']):
         raise Exception("Failed to set disallow_aps")
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=15)
-    if ev is None:
-        raise Exception("Reassociation timed out")
+    ev = dev[0].wait_connected(timeout=30, error="Reassociation timed out")
     if apdev[1]['bssid'] not in ev:
         raise Exception("Unexpected BSSID")
 
     dev[0].dump_monitor()
     if "OK" not in dev[0].request("SET disallow_aps ssid " + "test".encode("hex")):
         raise Exception("Failed to set disallow_aps")
-    ev = dev[0].wait_event(["CTRL-EVENT-DISCONNECTED"], timeout=5)
-    if ev is None:
-        raise Exception("Disconnection not seen")
+    dev[0].wait_disconnected(timeout=5, error="Disconnection not seen")
     ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=1)
     if ev is not None:
         raise Exception("Unexpected reassociation")
+
+    dev[0].request("DISCONNECT")
+    dev[0].p2p_start_go(freq=2412)
+    if "OK" not in dev[0].request("SET disallow_aps "):
+        raise Exception("Failed to set disallow_aps")
 
 def test_wpas_ctrl_blob(dev):
     """wpa_supplicant ctrl_iface SET blob"""
@@ -687,6 +768,10 @@ def test_wpas_ctrl_set_uapsd(dev):
 def test_wpas_ctrl_set(dev):
     """wpa_supplicant ctrl_iface SET"""
     vals = [ "foo",
+             "ampdu 0",
+             "radio_disable 0",
+             "ps 10",
+             "ps 1",
              "dot11RSNAConfigPMKLifetime 0",
              "dot11RSNAConfigPMKReauthThreshold 101",
              "dot11RSNAConfigSATimeout 0",
@@ -701,6 +786,9 @@ def test_wpas_ctrl_set(dev):
              "EAPOL::startPeriod 30",
              "EAPOL::maxStart 3",
              "dot11RSNAConfigSATimeout 60",
+             "ps -1",
+             "ps 0",
+             "no_keep_alive 0",
              "tdls_disabled 1",
              "tdls_disabled 0" ]
     for val in vals:
@@ -710,6 +798,8 @@ def test_wpas_ctrl_set(dev):
 def test_wpas_ctrl_get_capability(dev):
     """wpa_supplicant ctrl_iface GET_CAPABILITY"""
     if "FAIL" not in dev[0].request("GET_CAPABILITY 1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890"):
+        raise Exception("Unexpected success on invalid GET_CAPABILITY")
+    if "FAIL" not in dev[0].request("GET_CAPABILITY eap foo"):
         raise Exception("Unexpected success on invalid GET_CAPABILITY")
     if "AP" not in dev[0].request("GET_CAPABILITY modes strict"):
         raise Exception("Unexpected GET_CAPABILITY response")
@@ -752,6 +842,10 @@ def test_wpas_ctrl_get_capability(dev):
     res = dev[0].get_capability("tdls")
     if "EXTERNAL" not in res[0]:
         raise Exception("Unexpected GET_CAPABILITY tdls response: " + str(res))
+
+    res = dev[0].get_capability("erp")
+    if res is None or "ERP" not in res[0]:
+        raise Exception("Unexpected GET_CAPABILITY erp response: " + str(res))
 
     if dev[0].get_capability("foo") is not None:
         raise Exception("Unexpected GET_CAPABILITY foo response: " + str(res))
@@ -834,6 +928,12 @@ def test_wpas_ctrl_blacklist(dev):
     if dev[0].request("BLACKLIST") != "":
         raise Exception("Unexpected blacklist contents")
 
+def test_wpas_ctrl_blacklist_oom(dev):
+    """wpa_supplicant ctrl_iface BLACKLIST and out-of-memory"""
+    with alloc_fail(dev[0], 1, "wpa_blacklist_add"):
+        if "FAIL" not in dev[0].request("BLACKLIST aa:bb:cc:dd:ee:ff"):
+            raise Exception("Unexpected success with allocation failure")
+
 def test_wpas_ctrl_log_level(dev):
     """wpa_supplicant ctrl_iface LOG_LEVEL"""
     level = dev[2].request("LOG_LEVEL")
@@ -891,26 +991,18 @@ def test_wpas_ctrl_enable_disable_network(dev, apdev):
         raise Exception("Failed to disable networks")
     if "OK" not in dev[0].request("ENABLE_NETWORK " + str(id)):
         raise Exception("Failed to enable network")
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=10)
-    if ev is None:
-        raise Exception("Association with the AP timed out")
+    dev[0].wait_connected(timeout=10)
     if "OK" not in dev[0].request("DISABLE_NETWORK " + str(id)):
         raise Exception("Failed to disable network")
-    ev = dev[0].wait_event(["CTRL-EVENT-DISCONNECTED"], timeout=10)
-    if ev is None:
-        raise Exception("Disconnection with the AP timed out")
+    dev[0].wait_disconnected(timeout=10)
     time.sleep(0.1)
 
     if "OK" not in dev[0].request("ENABLE_NETWORK all"):
         raise Exception("Failed to enable network")
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=10)
-    if ev is None:
-        raise Exception("Association with the AP timed out")
+    dev[0].wait_connected(timeout=10)
     if "OK" not in dev[0].request("DISABLE_NETWORK all"):
         raise Exception("Failed to disable network")
-    ev = dev[0].wait_event(["CTRL-EVENT-DISCONNECTED"], timeout=10)
-    if ev is None:
-        raise Exception("Disconnection with the AP timed out")
+    dev[0].wait_disconnected(timeout=10)
 
 def test_wpas_ctrl_country(dev, apdev):
     """wpa_supplicant SET/GET country code"""
@@ -935,10 +1027,10 @@ def test_wpas_ctrl_country(dev, apdev):
         ev = dev[0].wait_event(["CTRL-EVENT-REGDOM-CHANGE"])
         if ev is None:
             raise Exception("regdom change event not seen")
-        if "init=DRIVER type=WORLD" not in ev:
+        if "init=CORE type=WORLD" not in ev:
             raise Exception("Unexpected event contents: " + ev)
     finally:
-        subprocess.call(['sudo', 'iw', 'reg', 'set', '00'])
+        subprocess.call(['iw', 'reg', 'set', '00'])
 
 def test_wpas_ctrl_suspend_resume(dev):
     """wpa_supplicant SUSPEND/RESUME"""
@@ -987,10 +1079,10 @@ def test_wpas_ctrl_global(dev):
 
     if "p2p_state=IDLE" not in wpas.global_request("STATUS"):
         raise Exception("P2P was disabled")
-    wpas.request("P2P_SET disabled 1")
+    wpas.global_request("P2P_SET disabled 1")
     if "p2p_state=DISABLED" not in wpas.global_request("STATUS"):
         raise Exception("P2P was not disabled")
-    wpas.request("P2P_SET disabled 0")
+    wpas.global_request("P2P_SET disabled 0")
     if "p2p_state=IDLE" not in wpas.global_request("STATUS"):
         raise Exception("P2P was not enabled")
 
@@ -1028,3 +1120,230 @@ def test_wpas_ctrl_roam(dev, apdev):
     id = dev[0].connect("test", key_mgmt="NONE", scan_freq="2412")
     if "FAIL" not in dev[0].request("ROAM 00:11:22:33:44:55"):
         raise Exception("Unexpected success")
+
+def test_wpas_ctrl_ipaddr(dev, apdev):
+    """wpa_supplicant IP address in STATUS"""
+    try:
+        subprocess.call(['ip', 'addr', 'add', '10.174.65.207/32', 'dev',
+                         dev[0].ifname])
+        ipaddr = dev[0].get_status_field('ip_address')
+        if ipaddr != '10.174.65.207':
+            raise Exception("IP address not in STATUS output")
+    finally:
+        subprocess.call(['ip', 'addr', 'del', '10.174.65.207/32', 'dev',
+                         dev[0].ifname])
+
+def test_wpas_ctrl_neighbor_rep_req(dev, apdev):
+    """wpa_supplicant ctrl_iface NEIGHBOR_REP_REQUEST"""
+    params = { "ssid": "test" }
+    hostapd.add_ap(apdev[0]['ifname'], params)
+    params = { "ssid": "test2", "radio_measurements": "1" }
+    hostapd.add_ap(apdev[1]['ifname'], params)
+
+    dev[0].connect("test", key_mgmt="NONE", scan_freq="2412")
+    if "FAIL" not in dev[0].request("NEIGHBOR_REP_REQUEST"):
+        raise Exception("Request succeeded unexpectedly")
+    if "FAIL" not in dev[0].request("NEIGHBOR_REP_REQUEST ssid=abcdef"):
+        raise Exception("Request succeeded unexpectedly")
+    dev[0].request("DISCONNECT")
+
+    rrm = int(dev[0].get_driver_status_field("capa.rrm_flags"), 16)
+    if rrm & 0x5 != 0x5:
+        logger.info("Driver does not support required RRM capabilities - skip rest of the test case")
+        return
+
+    dev[0].connect("test2", key_mgmt="NONE", scan_freq="2412")
+
+    # These requests are expected to get sent properly, but since hostapd does
+    # not yet support processing of the request, these are expected to fail.
+    
+    if "OK" not in dev[0].request("NEIGHBOR_REP_REQUEST"):
+        raise Exception("Request failed")
+    ev = dev[0].wait_event([ "RRM-NEIGHBOR-REP-RECEIVED",
+                             "RRM-NEIGHBOR-REP-REQUEST-FAILED" ], timeout=10)
+    if ev is None:
+        raise Exception("RRM report result not indicated")
+    logger.info("RRM result: " + ev)
+
+    if "OK" not in dev[0].request("NEIGHBOR_REP_REQUEST ssid=abcdef"):
+        raise Exception("Request failed")
+    ev = dev[0].wait_event([ "RRM-NEIGHBOR-REP-RECEIVED",
+                             "RRM-NEIGHBOR-REP-REQUEST-FAILED" ], timeout=10)
+    if ev is None:
+        raise Exception("RRM report result not indicated")
+    logger.info("RRM result: " + ev)
+
+def test_wpas_ctrl_rsp(dev, apdev):
+    """wpa_supplicant ctrl_iface CTRL-RSP-"""
+    if "FAIL" not in dev[0].request("CTRL-RSP-"):
+        raise Exception("Request succeeded unexpectedly")
+    if "FAIL" not in dev[0].request("CTRL-RSP-foo-"):
+        raise Exception("Request succeeded unexpectedly")
+    if "FAIL" not in dev[0].request("CTRL-RSP-foo-1234567"):
+        raise Exception("Request succeeded unexpectedly")
+    if "FAIL" not in dev[0].request("CTRL-RSP-foo-1234567:"):
+        raise Exception("Request succeeded unexpectedly")
+    id = dev[0].add_network()
+    if "FAIL" not in dev[0].request("CTRL-RSP-foo-%d:" % id):
+        raise Exception("Request succeeded unexpectedly")
+    for req in [ "IDENTITY", "PASSWORD", "NEW_PASSWORD", "PIN", "OTP",
+                 "PASSPHRASE", "SIM" ]:
+        if "OK" not in dev[0].request("CTRL-RSP-%s-%d:" % (req, id)):
+            raise Exception("Request failed unexpectedly")
+        if "OK" not in dev[0].request("CTRL-RSP-%s-%d:" % (req, id)):
+            raise Exception("Request failed unexpectedly")
+
+def test_wpas_ctrl_vendor(dev, apdev):
+    """wpa_supplicant ctrl_iface VENDOR"""
+    cmds = [ "foo",
+             "1",
+             "1 foo",
+             "1 2foo",
+             "1 2 qq" ]
+    for cmd in cmds:
+        if "FAIL" not in dev[0].request("VENDOR " + cmd):
+            raise Exception("Invalid VENDOR command accepted: " + cmd)
+
+def test_wpas_ctrl_mgmt_tx(dev, apdev):
+    """wpa_supplicant ctrl_iface MGMT_TX"""
+    cmds = [ "foo",
+             "00:11:22:33:44:55 foo",
+             "00:11:22:33:44:55 11:22:33:44:55:66",
+             "00:11:22:33:44:55 11:22:33:44:55:66 freq=0 no_cck=0 wait_time=0 action=123",
+             "00:11:22:33:44:55 11:22:33:44:55:66 action=12qq" ]
+    for cmd in cmds:
+        if "FAIL" not in dev[0].request("MGMT_TX " + cmd):
+            raise Exception("Invalid MGMT_TX command accepted: " + cmd)
+
+    if "OK" not in dev[0].request("MGMT_TX_DONE"):
+        raise Exception("MGMT_TX_DONE failed")
+
+def test_wpas_ctrl_driver_event(dev, apdev):
+    """wpa_supplicant ctrl_iface DRIVER_EVENT"""
+    if "FAIL" not in dev[0].request("DRIVER_EVENT foo"):
+        raise Exception("Invalid DRIVER_EVENT accepted")
+
+def test_wpas_ctrl_eapol_rx(dev, apdev):
+    """wpa_supplicant ctrl_iface EAPOL_RX"""
+    cmds = [ "foo",
+             "00:11:22:33:44:55 123",
+             "00:11:22:33:44:55 12qq" ]
+    for cmd in cmds:
+        if "FAIL" not in dev[0].request("EAPOL_RX " + cmd):
+            raise Exception("Invalid EAPOL_RX command accepted: " + cmd)
+
+def test_wpas_ctrl_data_test(dev, apdev):
+    """wpa_supplicant ctrl_iface DATA_TEST"""
+    dev[0].request("DATA_TEST_CONFIG 0")
+    if "FAIL" not in dev[0].request("DATA_TEST_TX 00:11:22:33:44:55 00:11:22:33:44:55 0"):
+        raise Exception("DATA_TEST_TX accepted when not in test mode")
+
+    try:
+        if "OK" not in dev[0].request("DATA_TEST_CONFIG 1"):
+            raise Exception("DATA_TEST_CONFIG failed")
+        if "OK" not in dev[0].request("DATA_TEST_CONFIG 1"):
+            raise Exception("DATA_TEST_CONFIG failed")
+        cmds = [ "foo",
+                 "00:11:22:33:44:55 foo",
+                 "00:11:22:33:44:55 00:11:22:33:44:55 -1",
+                 "00:11:22:33:44:55 00:11:22:33:44:55 256" ]
+        for cmd in cmds:
+            if "FAIL" not in dev[0].request("DATA_TEST_TX " + cmd):
+                raise Exception("Invalid DATA_TEST_TX command accepted: " + cmd)
+        if "OK" not in dev[0].request("DATA_TEST_TX 00:11:22:33:44:55 00:11:22:33:44:55 0"):
+            raise Exception("DATA_TEST_TX failed")
+    finally:
+        dev[0].request("DATA_TEST_CONFIG 0")
+
+    cmds = [ "",
+             "00",
+             "00112233445566778899aabbccdde",
+             "00112233445566778899aabbccdq" ]
+    for cmd in cmds:
+        if "FAIL" not in dev[0].request("DATA_TEST_FRAME " + cmd):
+            raise Exception("Invalid DATA_TEST_FRAME command accepted: " + cmd)
+
+    if "OK" not in dev[0].request("DATA_TEST_FRAME 00112233445566778899aabbccddee"):
+        raise Exception("DATA_TEST_FRAME failed")
+
+def test_wpas_ctrl_vendor_elem(dev, apdev):
+    """wpa_supplicant ctrl_iface VENDOR_ELEM"""
+    if "OK" not in dev[0].request("VENDOR_ELEM_ADD 1 "):
+        raise Exception("VENDOR_ELEM_ADD failed")
+    cmds = [ "-1 ",
+             "255 ",
+             "1",
+             "1 123",
+             "1 12qq34" ]
+    for cmd in cmds:
+        if "FAIL" not in dev[0].request("VENDOR_ELEM_ADD " + cmd):
+            raise Exception("Invalid VENDOR_ELEM_ADD command accepted: " + cmd)
+
+    cmds = [ "-1 ",
+             "255 " ]
+    for cmd in cmds:
+        if "FAIL" not in dev[0].request("VENDOR_ELEM_GET " + cmd):
+            raise Exception("Invalid VENDOR_ELEM_GET command accepted: " + cmd)
+
+    dev[0].request("VENDOR_ELEM_REMOVE 1 *")
+    cmds = [ "-1 ",
+             "255 ",
+             "1",
+             "1",
+             "1 123",
+             "1 12qq34",
+             "1 12",
+             "1 0000" ]
+    for cmd in cmds:
+        if "FAIL" not in dev[0].request("VENDOR_ELEM_REMOVE " + cmd):
+            raise Exception("Invalid VENDOR_ELEM_REMOVE command accepted: " + cmd)
+
+    dev[0].request("VENDOR_ELEM_ADD 1 000100")
+    if "OK" not in dev[0].request("VENDOR_ELEM_REMOVE 1 "):
+        raise Exception("VENDOR_ELEM_REMOVE failed")
+    cmds = [ "-1 ",
+             "255 ",
+             "1",
+             "1 123",
+             "1 12qq34",
+             "1 12",
+             "1 0000" ]
+    for cmd in cmds:
+        if "FAIL" not in dev[0].request("VENDOR_ELEM_REMOVE " + cmd):
+            raise Exception("Invalid VENDOR_ELEM_REMOVE command accepted: " + cmd)
+    if "OK" not in dev[0].request("VENDOR_ELEM_REMOVE 1 000100"):
+        raise Exception("VENDOR_ELEM_REMOVE failed")
+
+def test_wpas_ctrl_misc(dev, apdev):
+    """wpa_supplicant ctrl_iface and miscellaneous commands"""
+    if "OK" not in dev[0].request("RELOG"):
+        raise Exception("RELOG failed")
+    if dev[0].request("IFNAME") != dev[0].ifname:
+        raise Exception("IFNAME returned unexpected response")
+    if "FAIL" not in dev[0].request("REATTACH"):
+        raise Exception("REATTACH accepted while disabled")
+    if "OK" not in dev[2].request("RECONFIGURE"):
+        raise Exception("RECONFIGURE failed")
+    if "FAIL" in dev[0].request("INTERFACE_LIST"):
+        raise Exception("INTERFACE_LIST failed")
+    if "UNKNOWN COMMAND" not in dev[0].request("FOO"):
+        raise Exception("Unknown command accepted")
+
+    if "FAIL" not in dev[0].global_request("INTERFACE_REMOVE foo"):
+        raise Exception("Invalid INTERFACE_REMOVE accepted")
+    if "FAIL" not in dev[0].global_request("SET foo"):
+        raise Exception("Invalid global SET accepted")
+
+def test_wpas_ctrl_dump(dev, apdev):
+    """wpa_supplicant ctrl_iface and DUMP/GET global parameters"""
+    vals = dev[0].get_config()
+    logger.info("Config values from DUMP: " + str(vals))
+    for field in vals:
+        res = dev[0].request("GET " + field)
+        if res == 'FAIL\n':
+            res = "null"
+        if res != vals[field]:
+            print "'{}' != '{}'".format(res, vals[field])
+            raise Exception("Mismatch in config field " + field)
+    if "beacon_int" not in vals:
+        raise Exception("Missing config field")

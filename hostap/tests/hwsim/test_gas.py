@@ -53,7 +53,8 @@ def start_ap(ap):
     hostapd.add_ap(ap['ifname'], params)
     return hostapd.Hostapd(ap['ifname'])
 
-def get_gas_response(dev, bssid, info, allow_fetch_failure=False):
+def get_gas_response(dev, bssid, info, allow_fetch_failure=False,
+                     extra_test=False):
     exp = r'<.>(GAS-RESPONSE-INFO) addr=([0-9a-f:]*) dialog_token=([0-9]*) status_code=([0-9]*) resp_len=([\-0-9]*)'
     res = re.split(exp, info)
     if len(res) < 6:
@@ -70,6 +71,19 @@ def get_gas_response(dev, bssid, info, allow_fetch_failure=False):
     if int(resp_len) > 2000:
         raise Exception("Unexpected long GAS response")
 
+    if extra_test:
+        if "FAIL" not in dev.request("GAS_RESPONSE_GET " + bssid + " 123456"):
+            raise Exception("Invalid dialog token accepted")
+        if "FAIL-Invalid range" not in dev.request("GAS_RESPONSE_GET " + bssid + " " + token + " 10000,10001"):
+            raise Exception("Invalid range accepted")
+        if "FAIL-Invalid range" not in dev.request("GAS_RESPONSE_GET " + bssid + " " + token + " 0,10000"):
+            raise Exception("Invalid range accepted")
+        if "FAIL" not in dev.request("GAS_RESPONSE_GET " + bssid + " " + token + " 0"):
+            raise Exception("Invalid GAS_RESPONSE_GET accepted")
+
+        res1_2 = dev.request("GAS_RESPONSE_GET " + bssid + " " + token + " 1,2")
+        res5_3 = dev.request("GAS_RESPONSE_GET " + bssid + " " + token + " 5,3")
+
     resp = dev.request("GAS_RESPONSE_GET " + bssid + " " + token)
     if "FAIL" in resp:
         if allow_fetch_failure:
@@ -79,6 +93,11 @@ def get_gas_response(dev, bssid, info, allow_fetch_failure=False):
     if len(resp) != int(resp_len) * 2:
         raise Exception("Unexpected GAS response length")
     logger.debug("GAS response: " + resp)
+    if extra_test:
+        if resp[2:6] != res1_2:
+            raise Exception("Unexpected response substring res1_2: " + res1_2)
+        if resp[10:16] != res5_3:
+            raise Exception("Unexpected response substring res5_3: " + res5_3)
 
 def test_gas_generic(dev, apdev):
     """Generic GAS query"""
@@ -87,6 +106,22 @@ def test_gas_generic(dev, apdev):
     params['hessid'] = bssid
     hostapd.add_ap(apdev[0]['ifname'], params)
 
+    cmds = [ "foo",
+             "00:11:22:33:44:55",
+             "00:11:22:33:44:55 ",
+             "00:11:22:33:44:55  ",
+             "00:11:22:33:44:55 1",
+             "00:11:22:33:44:55 1 1234",
+             "00:11:22:33:44:55 qq",
+             "00:11:22:33:44:55 qq 1234",
+             "00:11:22:33:44:55 00      1",
+             "00:11:22:33:44:55 00 123",
+             "00:11:22:33:44:55 00 ",
+             "00:11:22:33:44:55 00 qq" ]
+    for cmd in cmds:
+        if "FAIL" not in dev[0].request("GAS_REQUEST " + cmd):
+            raise Exception("Invalid GAS_REQUEST accepted: " + cmd)
+
     dev[0].scan_for_bss(bssid, freq="2412", force_scan=True)
     req = dev[0].request("GAS_REQUEST " + bssid + " 00 000102000101")
     if "FAIL" in req:
@@ -94,7 +129,10 @@ def test_gas_generic(dev, apdev):
     ev = dev[0].wait_event(["GAS-RESPONSE-INFO"], timeout=10)
     if ev is None:
         raise Exception("GAS query timed out")
-    get_gas_response(dev[0], bssid, ev)
+    get_gas_response(dev[0], bssid, ev, extra_test=True)
+
+    if "FAIL" not in dev[0].request("GAS_RESPONSE_GET ff"):
+        raise Exception("Invalid GAS_RESPONSE_GET accepted")
 
 def test_gas_concurrent_scan(dev, apdev):
     """Generic GAS queries with concurrent scan operation"""
@@ -169,9 +207,7 @@ def test_gas_concurrent_connect(dev, apdev):
     get_gas_response(dev[0], bssid, ev)
 
     dev[0].request("DISCONNECT")
-    ev = dev[0].wait_event(["CTRL-EVENT-DISCONNECTED"], timeout=5)
-    if ev is None:
-        raise Exception("Disconnection timed out")
+    dev[0].wait_disconnected(timeout=5)
 
     logger.debug("Wait six seconds for expiration of connect-without-scan")
     time.sleep(6)
@@ -192,9 +228,7 @@ def test_gas_concurrent_connect(dev, apdev):
     if ev is None:
         raise Exception("No new scan results reported")
 
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=20)
-    if ev is None:
-        raise Exception("Operation timed out")
+    ev = dev[0].wait_connected(timeout=20, error="Operation tiemd out")
     if "CTRL-EVENT-CONNECTED" not in ev:
         raise Exception("Unexpected operation order")
 
@@ -221,6 +255,21 @@ def test_gas_comeback_delay(dev, apdev):
         ev = dev[0].wait_event(["RX-ANQP"], timeout=5)
         if ev is None:
             raise Exception("Operation timed out")
+
+def test_gas_stop_fetch_anqp(dev, apdev):
+    """Stop FETCH_ANQP operation"""
+    hapd = start_ap(apdev[0])
+
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq="2412", force_scan=True)
+    hapd.set("ext_mgmt_frame_handling", "1")
+    dev[0].request("FETCH_ANQP")
+    dev[0].request("STOP_FETCH_ANQP")
+    hapd.set("ext_mgmt_frame_handling", "0")
+    ev = dev[0].wait_event(["RX-ANQP", "GAS-QUERY-DONE"], timeout=10)
+    if ev is None:
+        raise Exception("GAS-QUERY-DONE timed out")
+    if "RX-ANQP" in ev:
+        raise Exception("Unexpected ANQP response received")
 
 def test_gas_anqp_get(dev, apdev):
     """GAS/ANQP query for both IEEE 802.11 and Hotspot 2.0 elements"""
@@ -255,6 +304,12 @@ def test_gas_anqp_get(dev, apdev):
     if ev is None or "WAN Metrics" not in ev:
         raise Exception("Did not receive WAN Metrics")
 
+    ev = dev[0].wait_event(["ANQP-QUERY-DONE"], timeout=10)
+    if ev is None:
+        raise Exception("ANQP-QUERY-DONE event not seen")
+    if "result=SUCCESS" not in ev:
+        raise Exception("Unexpected result: " + ev)
+
     if "OK" not in dev[0].request("HS20_ANQP_GET " + bssid + " 3,4"):
         raise Exception("ANQP_GET command failed")
 
@@ -265,6 +320,33 @@ def test_gas_anqp_get(dev, apdev):
     ev = dev[0].wait_event(["RX-HS20-ANQP"], timeout=1)
     if ev is None or "WAN Metrics" not in ev:
         raise Exception("Did not receive WAN Metrics")
+
+    cmds = [ "",
+             "foo",
+             "00:11:22:33:44:55 258,hs20:-1",
+             "00:11:22:33:44:55 258,hs20:0",
+             "00:11:22:33:44:55 258,hs20:32",
+             "00:11:22:33:44:55 hs20:-1",
+             "00:11:22:33:44:55 hs20:0",
+             "00:11:22:33:44:55 hs20:32",
+             "00:11:22:33:44:55",
+             "00:11:22:33:44:55 ",
+             "00:11:22:33:44:55 0" ]
+    for cmd in cmds:
+        if "FAIL" not in dev[0].request("ANQP_GET " + cmd):
+            raise Exception("Invalid ANQP_GET accepted")
+
+    cmds = [ "",
+             "foo",
+             "00:11:22:33:44:55 -1",
+             "00:11:22:33:44:55 0",
+             "00:11:22:33:44:55 32",
+             "00:11:22:33:44:55",
+             "00:11:22:33:44:55 ",
+             "00:11:22:33:44:55 0" ]
+    for cmd in cmds:
+        if "FAIL" not in dev[0].request("HS20_ANQP_GET " + cmd):
+            raise Exception("Invalid HS20_ANQP_GET accepted")
 
 def expect_gas_result(dev, result, status=None):
     ev = dev.wait_event(["GAS-QUERY-DONE"], timeout=10)
@@ -488,9 +570,15 @@ def test_gas_malformed(dev, apdev):
 
     # Station drops invalid frames, but the last of the responses is valid from
     # GAS view point even though it has an extra octet in the end and the ANQP
-    # part of the response is not valid. This is reported as successfulyl
+    # part of the response is not valid. This is reported as successfully
     # completed GAS exchange.
     expect_gas_result(dev[0], "SUCCESS")
+
+    ev = dev[0].wait_event(["ANQP-QUERY-DONE"], timeout=5)
+    if ev is None:
+        raise Exception("ANQP-QUERY-DONE not reported")
+    if "result=INVALID_FRAME" not in ev:
+        raise Exception("Unexpected result: " + ev)
 
 def init_gas(hapd, bssid, dev):
     anqp_get(dev, bssid, 263)
@@ -728,3 +816,30 @@ def test_gas_no_pending(dev, apdev):
     status_code = gresp['status_code']
     if status_code != 60:
         raise Exception("Unexpected status code {} (expected 60)".format(status_code))
+
+def test_gas_missing_payload(dev, apdev):
+    """No action code in the query frame"""
+    bssid = apdev[0]['bssid']
+    params = hs20_ap_params()
+    params['hessid'] = bssid
+    hostapd.add_ap(apdev[0]['ifname'], params)
+
+    dev[0].scan_for_bss(bssid, freq="2412", force_scan=True)
+
+    cmd = "MGMT_TX {} {} freq=2412 action=040A".format(bssid, bssid)
+    if "FAIL" in dev[0].request(cmd):
+        raise Exception("Could not send test Action frame")
+    ev = dev[0].wait_event(["MGMT-TX-STATUS"], timeout=10)
+    if ev is None:
+        raise Exception("Timeout on MGMT-TX-STATUS")
+    if "result=SUCCESS" not in ev:
+        raise Exception("AP did not ack Action frame")
+
+    cmd = "MGMT_TX {} {} freq=2412 action=04".format(bssid, bssid)
+    if "FAIL" in dev[0].request(cmd):
+        raise Exception("Could not send test Action frame")
+    ev = dev[0].wait_event(["MGMT-TX-STATUS"], timeout=10)
+    if ev is None:
+        raise Exception("Timeout on MGMT-TX-STATUS")
+    if "result=SUCCESS" not in ev:
+        raise Exception("AP did not ack Action frame")

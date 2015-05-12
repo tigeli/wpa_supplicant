@@ -8,7 +8,8 @@
 import os.path
 
 import hostapd
-from test_ap_eap import int_eap_server_params
+from utils import HwsimSkip
+from test_ap_eap import int_eap_server_params, check_eap_capa
 
 def test_tnc_peap_soh(dev, apdev):
     """TNC PEAP-SoH"""
@@ -22,9 +23,7 @@ def test_tnc_peap_soh(dev, apdev):
                    phase1="peapver=0 tnc=soh cryptobinding=0",
                    phase2="auth=MSCHAPV2",
                    wait_connect=False)
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=10)
-    if ev is None:
-        raise Exception("Connection timed out")
+    dev[0].wait_connected(timeout=10)
 
     dev[1].connect("test-wpa2-eap", key_mgmt="WPA-EAP",
                    eap="PEAP", identity="user", password="password",
@@ -32,9 +31,7 @@ def test_tnc_peap_soh(dev, apdev):
                    phase1="peapver=0 tnc=soh1 cryptobinding=1",
                    phase2="auth=MSCHAPV2",
                    wait_connect=False)
-    ev = dev[1].wait_event(["CTRL-EVENT-CONNECTED"], timeout=10)
-    if ev is None:
-        raise Exception("Connection timed out")
+    dev[1].wait_connected(timeout=10)
 
     dev[2].connect("test-wpa2-eap", key_mgmt="WPA-EAP",
                    eap="PEAP", identity="user", password="password",
@@ -42,9 +39,7 @@ def test_tnc_peap_soh(dev, apdev):
                    phase1="peapver=0 tnc=soh2 cryptobinding=2",
                    phase2="auth=MSCHAPV2",
                    wait_connect=False)
-    ev = dev[2].wait_event(["CTRL-EVENT-CONNECTED"], timeout=10)
-    if ev is None:
-        raise Exception("Connection timed out")
+    dev[2].wait_connected(timeout=10)
 
 def test_tnc_ttls(dev, apdev):
     """TNC TTLS"""
@@ -53,8 +48,7 @@ def test_tnc_ttls(dev, apdev):
     hostapd.add_ap(apdev[0]['ifname'], params)
 
     if not os.path.exists("tnc/libhostap_imc.so"):
-        logger.info("No IMC installed - skip")
-        return "skip"
+        raise HwsimSkip("No IMC installed")
 
     dev[0].connect("test-wpa2-eap", key_mgmt="WPA-EAP",
                    eap="TTLS", identity="DOMAIN\mschapv2 user",
@@ -62,12 +56,30 @@ def test_tnc_ttls(dev, apdev):
                    phase2="auth=MSCHAPV2",
                    ca_cert="auth_serv/ca.pem",
                    wait_connect=False)
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=10)
-    if ev is None:
-        raise Exception("Connection timed out")
+    dev[0].wait_connected(timeout=10)
+
+def test_tnc_ttls_fragmentation(dev, apdev):
+    """TNC TTLS with fragmentation"""
+    params = int_eap_server_params()
+    params["tnc"] = "1"
+    params["fragment_size"] = "150"
+    hostapd.add_ap(apdev[0]['ifname'], params)
+
+    if not os.path.exists("tnc/libhostap_imc.so"):
+        raise HwsimSkip("No IMC installed")
+
+    dev[0].connect("test-wpa2-eap", key_mgmt="WPA-EAP",
+                   eap="TTLS", identity="DOMAIN\mschapv2 user",
+                   anonymous_identity="ttls", password="password",
+                   phase2="auth=MSCHAPV2",
+                   ca_cert="auth_serv/ca.pem",
+                   fragment_size="150",
+                   wait_connect=False)
+    dev[0].wait_connected(timeout=10)
 
 def test_tnc_fast(dev, apdev):
     """TNC FAST"""
+    check_eap_capa(dev[0], "FAST")
     params = int_eap_server_params()
     params["tnc"] = "1"
     params["pac_opaque_encr_key"] ="000102030405060708090a0b0c0d0e00"
@@ -77,8 +89,7 @@ def test_tnc_fast(dev, apdev):
     hostapd.add_ap(apdev[0]['ifname'], params)
 
     if not os.path.exists("tnc/libhostap_imc.so"):
-        logger.info("No IMC installed - skip")
-        return "skip"
+        raise HwsimSkip("No IMC installed")
 
     dev[0].connect("test-wpa2-eap", key_mgmt="WPA-EAP",
                    eap="FAST", identity="user",
@@ -88,6 +99,4 @@ def test_tnc_fast(dev, apdev):
                    pac_file="blob://fast_pac_auth_tnc",
                    ca_cert="auth_serv/ca.pem",
                    wait_connect=False)
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=10)
-    if ev is None:
-        raise Exception("Connection timed out")
+    dev[0].wait_connected(timeout=10)

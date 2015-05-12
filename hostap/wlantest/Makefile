@@ -32,6 +32,10 @@ ifeq ($(V), 1)
 Q=
 E=true
 endif
+ifeq ($(QUIET), 1)
+Q=@
+E=true
+endif
 
 %.o: %.c
 	$(Q)$(CC) -c -o $@ $(CFLAGS) $<
@@ -72,6 +76,7 @@ OBJS += ctrl.o
 OBJS += inject.o
 OBJS += wep.o
 OBJS += bip.o
+OBJS += gcmp.o
 
 LIBS += -lpcap
 

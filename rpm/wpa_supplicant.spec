@@ -1,8 +1,8 @@
 Name:       wpa_supplicant
 
 Summary:    WPA/WPA2/IEEE 802.1X Supplicant
-Version:    2.2
-Release:    5
+Version:    2.4
+Release:    1
 Group:      System Environment/Base
 License:    GPLv2
 URL:        http://w1.fi/wpa_supplicant/
@@ -11,7 +11,6 @@ Source1:    build-config
 Source2:    %{name}.conf
 Source3:    %{name}.service
 Source4:    %{name}.sysconfig
-Source6:    wpa_supplicant-2.0-generate-libeap-peer.patch
 BuildRequires:  pkgconfig(libnl-3.0)
 BuildRequires:  pkgconfig(dbus-1)
 BuildRequires:  pkgconfig(openssl)
@@ -29,29 +28,6 @@ for WPA and WPA2 (IEEE 802.11i / RSN). Supplicant is the IEEE 802.1X/WPA
 component that is used in the client stations. It implements key negotiation
 with a WPA Authenticator and it controls the roaming and IEEE 802.11
 authentication/association of the wlan driver.
-
-
-%package -n libeap-devel
-Summary:    Header files for EAP peer library
-Group:      Development/Libraries
-Requires:   %{name} = %{version}-%{release}
-Requires:   libeap = %{version}-%{release}
-
-%description -n libeap-devel
-This package contains header files for using the EAP peer library.
-Don't use this unless you know what you're doing.
-
-
-%package -n libeap
-Summary:    EAP peer library
-Group:      System Environment/Libraries
-Requires:   %{name} = %{version}-%{release}
-Requires(post): /sbin/ldconfig
-Requires(postun): /sbin/ldconfig
-
-%description -n libeap
-This package contains the runtime EAP peer library. Don't use this
-unless you know what you're doing.
 
 %prep
 %setup -q -n %{name}-%{version}/hostap
@@ -96,16 +72,6 @@ rm -f  %{name}/doc/.cvsignore
 rm -rf %{name}/doc/docbook
 chmod -R 0644 %{name}/examples/*.py
 
-# HAAACK
-rm -f src/eap_peer/libeap0.pc
-patch -p1 -b --suffix .wimax < %{SOURCE6}
-pushd wpa_supplicant
-make clean
-make -C ../src/eap_peer
-make DESTDIR=%{buildroot} LIB=%{_lib} -C ../src/eap_peer install
-sed -i -e 's|libdir=/usr/lib|libdir=%{_libdir}|g' %{buildroot}/%{_libdir}/pkgconfig/*.pc
-popd
-
 %preun
 if [ $1 -eq 0 ] ; then
 # Package removal, not upgrade
@@ -125,10 +91,6 @@ rm /var/log/wpa_supplicant.log || :
 # Lets not restart wpa_supplicant on postun to make sure network connectivity is not
 # broken during update process.
 
-%post -n libeap -p /sbin/ldconfig
-
-%postun -n libeap -p /sbin/ldconfig
-
 %files
 %defattr(-,root,root,-)
 %doc COPYING %{name}/ChangeLog README %{name}/eap_testing.txt %{name}/todo.txt %{name}/wpa_supplicant.conf %{name}/examples
@@ -144,14 +106,3 @@ rm /var/log/wpa_supplicant.log || :
 %dir %{_sysconfdir}/%{name}
 #%doc %{_mandir}/man8/*
 #%doc %{_mandir}/man5/*
-
-%files -n libeap-devel
-%defattr(-,root,root,-)
-%{_includedir}/eap_peer
-%{_libdir}/libeap.so
-%{_libdir}/pkgconfig/*.pc
-
-%files -n libeap
-%defattr(-,root,root,-)
-%{_libdir}/libeap.so.0*
-

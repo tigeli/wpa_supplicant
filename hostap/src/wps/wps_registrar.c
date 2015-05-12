@@ -42,7 +42,7 @@ struct wps_nfc_pw_token {
 static void wps_remove_nfc_pw_token(struct wps_nfc_pw_token *token)
 {
 	dl_list_del(&token->list);
-	os_free(token);
+	bin_clear_free(token, sizeof(*token));
 }
 
 
@@ -91,7 +91,7 @@ struct wps_uuid_pin {
 
 static void wps_free_pin(struct wps_uuid_pin *pin)
 {
-	os_free(pin->pin);
+	bin_clear_free(pin->pin, pin->pin_len);
 	os_free(pin);
 }
 
@@ -676,6 +676,22 @@ wps_registrar_init(struct wps_context *wps,
 }
 
 
+void wps_registrar_flush(struct wps_registrar *reg)
+{
+	if (reg == NULL)
+		return;
+	wps_free_pins(&reg->pins);
+	wps_free_nfc_pw_tokens(&reg->nfc_pw_tokens, 0);
+	wps_free_pbc_sessions(reg->pbc_sessions);
+	reg->pbc_sessions = NULL;
+	wps_free_devices(reg->devices);
+	reg->devices = NULL;
+#ifdef WPS_WORKAROUNDS
+	reg->pbc_ignore_start.sec = 0;
+#endif /* WPS_WORKAROUNDS */
+}
+
+
 /**
  * wps_registrar_deinit - Deinitialize WPS Registrar data
  * @reg: Registrar data from wps_registrar_init()
@@ -686,11 +702,8 @@ void wps_registrar_deinit(struct wps_registrar *reg)
 		return;
 	eloop_cancel_timeout(wps_registrar_pbc_timeout, reg, NULL);
 	eloop_cancel_timeout(wps_registrar_set_selected_timeout, reg, NULL);
-	wps_free_pins(&reg->pins);
-	wps_free_nfc_pw_tokens(&reg->nfc_pw_tokens, 0);
-	wps_free_pbc_sessions(reg->pbc_sessions);
+	wps_registrar_flush(reg);
 	wpabuf_free(reg->extra_cred);
-	wps_free_devices(reg->devices);
 	os_free(reg);
 }
 
@@ -826,7 +839,7 @@ static int wps_registrar_invalidate_wildcard_pin(struct wps_registrar *reg,
 	{
 		if (dev_pw && pin->pin &&
 		    (dev_pw_len != pin->pin_len ||
-		     os_memcmp(dev_pw, pin->pin, dev_pw_len) != 0))
+		     os_memcmp_const(dev_pw, pin->pin, dev_pw_len) != 0))
 			continue; /* different PIN */
 		if (pin->wildcard_uuid) {
 			wpa_hexdump(MSG_DEBUG, "WPS: Invalidated PIN for UUID",
@@ -1343,7 +1356,7 @@ static int wps_get_dev_password(struct wps_data *wps)
 	const u8 *pin;
 	size_t pin_len = 0;
 
-	os_free(wps->dev_password);
+	bin_clear_free(wps->dev_password, wps->dev_password_len);
 	wps->dev_password = NULL;
 
 	if (wps->pbc) {
@@ -1640,8 +1653,12 @@ int wps_build_cred(struct wps_data *wps, struct wpabuf *msg)
 	    !wps->wps->registrar->disable_auto_conf) {
 		u8 r[16];
 		/* Generate a random passphrase */
-		if (random_get_bytes(r, sizeof(r)) < 0)
+		if (random_pool_ready() != 1 ||
+		    random_get_bytes(r, sizeof(r)) < 0) {
+			wpa_printf(MSG_INFO,
+				   "WPS: Could not generate random PSK");
 			return -1;
+		}
 		os_free(wps->new_psk);
 		wps->new_psk = base64_encode(r, sizeof(r), &wps->new_psk_len);
 		if (wps->new_psk == NULL)
@@ -1674,7 +1691,10 @@ int wps_build_cred(struct wps_data *wps, struct wpabuf *msg)
 		wps->new_psk = os_malloc(wps->new_psk_len);
 		if (wps->new_psk == NULL)
 			return -1;
-		if (random_get_bytes(wps->new_psk, wps->new_psk_len) < 0) {
+		if (random_pool_ready() != 1 ||
+		    random_get_bytes(wps->new_psk, wps->new_psk_len) < 0) {
+			wpa_printf(MSG_INFO,
+				   "WPS: Could not generate random PSK");
 			os_free(wps->new_psk);
 			wps->new_psk = NULL;
 			return -1;
@@ -2211,7 +2231,7 @@ static int wps_process_e_snonce1(struct wps_data *wps, const u8 *e_snonce1)
 	len[3] = wpabuf_len(wps->dh_pubkey_r);
 	hmac_sha256_vector(wps->authkey, WPS_AUTHKEY_LEN, 4, addr, len, hash);
 
-	if (os_memcmp(wps->peer_hash1, hash, WPS_HASH_LEN) != 0) {
+	if (os_memcmp_const(wps->peer_hash1, hash, WPS_HASH_LEN) != 0) {
 		wpa_printf(MSG_DEBUG, "WPS: E-Hash1 derived from E-S1 does "
 			   "not match with the pre-committed value");
 		wps->config_error = WPS_CFG_DEV_PASSWORD_AUTH_FAILURE;
@@ -2251,7 +2271,7 @@ static int wps_process_e_snonce2(struct wps_data *wps, const u8 *e_snonce2)
 	len[3] = wpabuf_len(wps->dh_pubkey_r);
 	hmac_sha256_vector(wps->authkey, WPS_AUTHKEY_LEN, 4, addr, len, hash);
 
-	if (os_memcmp(wps->peer_hash2, hash, WPS_HASH_LEN) != 0) {
+	if (os_memcmp_const(wps->peer_hash2, hash, WPS_HASH_LEN) != 0) {
 		wpa_printf(MSG_DEBUG, "WPS: E-Hash2 derived from E-S2 does "
 			   "not match with the pre-committed value");
 		wps_registrar_invalidate_pin(wps->wps->registrar, wps->uuid_e);
@@ -2558,6 +2578,7 @@ static enum wps_process_res wps_process_m1(struct wps_data *wps,
 
 	if (wps->dev_pw_id < 0x10 &&
 	    wps->dev_pw_id != DEV_PW_DEFAULT &&
+	    wps->dev_pw_id != DEV_PW_P2PS_DEFAULT &&
 	    wps->dev_pw_id != DEV_PW_USER_SPECIFIED &&
 	    wps->dev_pw_id != DEV_PW_MACHINE_SPECIFIED &&
 	    wps->dev_pw_id != DEV_PW_REGISTRAR_SPECIFIED &&
@@ -2591,8 +2612,9 @@ static enum wps_process_res wps_process_m1(struct wps_data *wps,
 
 			addr[0] = attr->public_key;
 			sha256_vector(1, addr, &attr->public_key_len, hash);
-			if (os_memcmp(hash, wps->nfc_pw_token->pubkey_hash,
-				      WPS_OOB_PUBKEY_HASH_LEN) != 0) {
+			if (os_memcmp_const(hash,
+					    wps->nfc_pw_token->pubkey_hash,
+					    WPS_OOB_PUBKEY_HASH_LEN) != 0) {
 				wpa_printf(MSG_ERROR, "WPS: Public Key hash "
 					   "mismatch");
 				wps->state = SEND_M2D;
@@ -3487,7 +3509,7 @@ int wps_registrar_get_info(struct wps_registrar *reg, const u8 *addr,
 			  d->dev.model_name ? d->dev.model_name : "",
 			  d->dev.model_number ? d->dev.model_number : "",
 			  d->dev.serial_number ? d->dev.serial_number : "");
-	if (ret < 0 || (size_t) ret >= buflen - len)
+	if (os_snprintf_error(buflen - len, ret))
 		return len;
 	len += ret;
 

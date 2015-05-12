@@ -7,7 +7,7 @@
 # This software may be distributed under the terms of the BSD license.
 # See README for more details.
 
-import netlink
+import netlink, os
 
 # constants
 HWSIM_CMD_CREATE_RADIO		= 4
@@ -15,6 +15,7 @@ HWSIM_CMD_DESTROY_RADIO		= 5
 
 HWSIM_ATTR_CHANNELS		= 9
 HWSIM_ATTR_RADIO_ID		= 10
+HWSIM_ATTR_SUPPORT_P2P_DEVICE	= 14
 HWSIM_ATTR_USE_CHANCTX		= 15
 
 # the controller class
@@ -23,12 +24,15 @@ class HWSimController(object):
         self._conn = netlink.Connection(netlink.NETLINK_GENERIC)
         self._fid = netlink.genl_controller.get_family_id('MAC80211_HWSIM')
 
-    def create_radio(self, n_channels=None, use_chanctx=False):
+    def create_radio(self, n_channels=None, use_chanctx=False,
+                     use_p2p_device=False):
         attrs = []
         if n_channels:
             attrs.append(netlink.U32Attr(HWSIM_ATTR_CHANNELS, n_channels))
         if use_chanctx:
             attrs.append(netlink.FlagAttr(HWSIM_ATTR_USE_CHANCTX))
+        if use_p2p_device:
+            attrs.append(netlink.FlagAttr(HWSIM_ATTR_SUPPORT_P2P_DEVICE))
 
         msg = netlink.GenlMessage(self._fid, HWSIM_CMD_CREATE_RADIO,
                                   flags = netlink.NLM_F_REQUEST |
@@ -43,6 +47,32 @@ class HWSimController(object):
                                           netlink.NLM_F_ACK,
                                   attrs = attrs)
         msg.send_and_recv(self._conn)
+
+class HWSimRadio(object):
+    def __init__(self, n_channels=None, use_chanctx=False,
+                 use_p2p_device=False):
+        self._controller = HWSimController()
+        self._n_channels = n_channels
+        self._use_chanctx = use_chanctx
+        self._use_p2p_dev = use_p2p_device
+
+    def __enter__(self):
+        self._radio_id = self._controller.create_radio(
+              n_channels=self._n_channels,
+              use_chanctx=self._use_chanctx,
+              use_p2p_device=self._use_p2p_dev)
+        if self._radio_id < 0:
+            raise Exception("Failed to create radio (err:%d)" % self._radio_id)
+        try:
+            iface = os.listdir('/sys/class/mac80211_hwsim/hwsim%d/net/' % self._radio_id)[0]
+        except Exception,e:
+            self._controller.destroy_radio(self._radio_id)
+            raise e
+        return self._radio_id, iface
+
+    def __exit__(self, type, value, traceback):
+        self._controller.destroy_radio(self._radio_id)
+
 
 def create(args):
     print 'Created radio %d' % c.create_radio(n_channels=args.channels,

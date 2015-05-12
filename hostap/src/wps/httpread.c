@@ -413,8 +413,8 @@ static void httpread_read_handler(int sd, void *eloop_ctx, void *sock_ctx)
 		 */
 		if (httpread_debug >= 10)
 			wpa_printf(MSG_DEBUG, "httpread ok eof(%p)", h);
-			h->got_body = 1;
-			goto got_file;
+		h->got_body = 1;
+		goto got_file;
 	}
 	rbp = readbuf;
 
@@ -533,6 +533,13 @@ static void httpread_read_handler(int sd, void *eloop_ctx, void *sock_ctx)
 					if (!isxdigit(*cbp))
 						goto bad;
 					h->chunk_size = strtoul(cbp, NULL, 16);
+					if (h->chunk_size < 0 ||
+					    h->chunk_size > h->max_bytes) {
+						wpa_printf(MSG_DEBUG,
+							   "httpread: Invalid chunk size %d",
+							   h->chunk_size);
+						goto bad;
+					}
 					/* throw away chunk header
 					 * so we have only real data
 					 */

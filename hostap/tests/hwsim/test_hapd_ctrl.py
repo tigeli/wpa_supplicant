@@ -38,24 +38,16 @@ def test_hapd_ctrl_p2p_manager(dev, apdev):
     params['allow_cross_connection'] = '0'
     hapd = hostapd.add_ap(apdev[0]['ifname'], params)
     dev[0].connect(ssid, psk=passphrase, scan_freq="2412")
-    addr = dev[0].p2p_dev_addr()
+    addr = dev[0].own_addr()
     if "OK" not in hapd.request("DEAUTHENTICATE " + addr + " p2p=2"):
         raise Exception("DEAUTHENTICATE command failed")
-    ev = dev[0].wait_event(["CTRL-EVENT-DISCONNECTED"], timeout=5)
-    if ev is None:
-        raise Exception("Disconnection event timed out")
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"])
-    if ev is None:
-        raise Exception("Re-connection timed out")
+    dev[0].wait_disconnected(timeout=5)
+    dev[0].wait_connected(timeout=10, error="Re-connection timed out")
 
     if "OK" not in hapd.request("DISASSOCIATE " + addr + " p2p=2"):
         raise Exception("DISASSOCIATE command failed")
-    ev = dev[0].wait_event(["CTRL-EVENT-DISCONNECTED"], timeout=5)
-    if ev is None:
-        raise Exception("Disconnection event timed out")
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"])
-    if ev is None:
-        raise Exception("Re-connection timed out")
+    dev[0].wait_disconnected(timeout=5)
+    dev[0].wait_connected(timeout=10, error="Re-connection timed out")
 
 def test_hapd_ctrl_sta(dev, apdev):
     """hostapd and STA ctrl_iface commands"""
@@ -64,7 +56,7 @@ def test_hapd_ctrl_sta(dev, apdev):
     params = hostapd.wpa2_params(ssid=ssid, passphrase=passphrase)
     hapd = hostapd.add_ap(apdev[0]['ifname'], params)
     dev[0].connect(ssid, psk=passphrase, scan_freq="2412")
-    addr = dev[0].p2p_dev_addr()
+    addr = dev[0].own_addr()
     if "FAIL" in hapd.request("STA " + addr):
         raise Exception("Unexpected STA failure")
     if "FAIL" not in hapd.request("STA " + addr + " eapol"):
@@ -93,24 +85,16 @@ def test_hapd_ctrl_disconnect(dev, apdev):
 
     if "OK" not in hapd.request("DEAUTHENTICATE ff:ff:ff:ff:ff:ff"):
         raise Exception("Unexpected DEAUTHENTICATE failure")
-    ev = dev[0].wait_event(["CTRL-EVENT-DISCONNECTED"], timeout=5)
-    if ev is None:
-        raise Exception("Disconnection event timed out")
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"])
-    if ev is None:
-        raise Exception("Re-connection timed out")
+    dev[0].wait_disconnected(timeout=5)
+    dev[0].wait_connected(timeout=10, error="Re-connection timed out")
 
     if "FAIL" not in hapd.request("DISASSOCIATE 00:11:22:33:44"):
         raise Exception("Unexpected DISASSOCIATE success")
 
     if "OK" not in hapd.request("DISASSOCIATE ff:ff:ff:ff:ff:ff"):
         raise Exception("Unexpected DISASSOCIATE failure")
-    ev = dev[0].wait_event(["CTRL-EVENT-DISCONNECTED"], timeout=5)
-    if ev is None:
-        raise Exception("Disconnection event timed out")
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"])
-    if ev is None:
-        raise Exception("Re-connection timed out")
+    dev[0].wait_disconnected(timeout=5)
+    dev[0].wait_connected(timeout=10, error="Re-connection timed out")
 
 def test_hapd_ctrl_chan_switch(dev, apdev):
     """hostapd and CHAN_SWITCH ctrl_iface command"""
@@ -144,7 +128,7 @@ def test_hapd_ctrl_new_sta(dev, apdev):
     if "OK" not in hapd.request("NEW_STA 00:11:22:33:44:55"):
         raise Exception("Unexpected NEW_STA failure")
     if "AUTHORIZED" not in hapd.request("STA 00:11:22:33:44:55"):
-        raise Esception("Unexpected NEW_STA STA status")
+        raise Exception("Unexpected NEW_STA STA status")
 
 def test_hapd_ctrl_get(dev, apdev):
     """hostapd and GET ctrl_iface command"""
@@ -237,9 +221,7 @@ def test_hapd_ctrl_set_deny_mac_file(dev, apdev):
     dev[1].connect(ssid, key_mgmt="NONE", scan_freq="2412")
     if "OK" not in hapd.request("SET deny_mac_file hostapd.macaddr"):
         raise Exception("Unexpected SET failure")
-    ev = dev[0].wait_event(["CTRL-EVENT-DISCONNECTED"], 15)
-    if ev is None:
-        raise Exception("Disconnection timeout")
+    dev[0].wait_disconnected(timeout=15)
     ev = dev[1].wait_event(["CTRL-EVENT-DISCONNECTED"], 1)
     if ev is not None:
         raise Exception("Unexpected disconnection")
@@ -254,9 +236,7 @@ def test_hapd_ctrl_set_accept_mac_file(dev, apdev):
     hapd.request("SET macaddr_acl 1")
     if "OK" not in hapd.request("SET accept_mac_file hostapd.macaddr"):
         raise Exception("Unexpected SET failure")
-    ev = dev[1].wait_event(["CTRL-EVENT-DISCONNECTED"], 15)
-    if ev is None:
-        raise Exception("Disconnection timeout")
+    dev[1].wait_disconnected(timeout=15)
     ev = dev[0].wait_event(["CTRL-EVENT-DISCONNECTED"], 1)
     if ev is not None:
         raise Exception("Unexpected disconnection")

@@ -19,6 +19,8 @@ import StringIO
 
 import hwsim_utils
 import hostapd
+from wpasupplicant import WpaSupplicant
+from utils import HwsimSkip
 
 def test_ap_wps_init(dev, apdev):
     """Initial AP configuration with first WPS Enrollee"""
@@ -43,9 +45,7 @@ def test_ap_wps_init(dev, apdev):
     dev[0].request("ENABLE_NETWORK %s no-connect" % id)
 
     dev[0].request("WPS_PBC")
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
-    if ev is None:
-        raise Exception("Association with the AP timed out")
+    dev[0].wait_connected(timeout=30)
     status = dev[0].get_status()
     if status['wpa_state'] != 'COMPLETED' or status['bssid'] != apdev[0]['bssid']:
         raise Exception("Not fully connected")
@@ -102,9 +102,7 @@ def test_ap_wps_init_2ap_pbc(dev, apdev):
         raise Exception("WPS cred event not seen")
     if "100e" not in ev:
         raise Exception("WPS attributes not included in the cred event")
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
-    if ev is None:
-        raise Exception("Association with the AP timed out")
+    dev[0].wait_connected(timeout=30)
 
     dev[1].scan_for_bss(apdev[0]['bssid'], freq="2412", force_scan=True)
     dev[1].scan_for_bss(apdev[1]['bssid'], freq="2412")
@@ -135,9 +133,7 @@ def test_ap_wps_init_2ap_pin(dev, apdev):
         raise Exception("WPS-AUTH flag missing from AP2")
     dev[0].dump_monitor()
     dev[0].request("WPS_PIN any " + pin)
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
-    if ev is None:
-        raise Exception("Association with the AP timed out")
+    dev[0].wait_connected(timeout=30)
 
     dev[1].scan_for_bss(apdev[0]['bssid'], freq="2412", force_scan=True)
     dev[1].scan_for_bss(apdev[1]['bssid'], freq="2412")
@@ -177,11 +173,10 @@ def test_ap_wps_conf(dev, apdev):
     hapd = hostapd.Hostapd(apdev[0]['ifname'])
     logger.info("WPS provisioning step")
     hapd.request("WPS_PBC")
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq="2412")
     dev[0].dump_monitor()
-    dev[0].request("WPS_PBC")
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
-    if ev is None:
-        raise Exception("Association with the AP timed out")
+    dev[0].request("WPS_PBC " + apdev[0]['bssid'])
+    dev[0].wait_connected(timeout=30)
     status = dev[0].get_status()
     if status['wpa_state'] != 'COMPLETED':
         raise Exception("Not fully connected")
@@ -201,6 +196,7 @@ def test_ap_wps_conf(dev, apdev):
 def test_ap_wps_conf_5ghz(dev, apdev):
     """WPS PBC provisioning with configured AP on 5 GHz band"""
     try:
+        hapd = None
         ssid = "test-wps-conf"
         params = { "ssid": ssid, "eap_server": "1", "wps_state": "2",
                    "wpa_passphrase": "12345678", "wpa": "2",
@@ -209,20 +205,24 @@ def test_ap_wps_conf_5ghz(dev, apdev):
         hapd = hostapd.add_ap(apdev[0]['ifname'], params)
         logger.info("WPS provisioning step")
         hapd.request("WPS_PBC")
-        dev[0].request("WPS_PBC")
-        ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
-        if ev is None:
-            raise Exception("Association with the AP timed out")
+        dev[0].scan_for_bss(apdev[0]['bssid'], freq="5180")
+        dev[0].request("WPS_PBC " + apdev[0]['bssid'])
+        dev[0].wait_connected(timeout=30)
 
         sta = hapd.get_sta(dev[0].p2p_interface_addr())
         if 'wpsDeviceName' not in sta or sta['wpsDeviceName'] != "Device A":
             raise Exception("Device name not available in STA command")
     finally:
-        subprocess.call(['sudo', 'iw', 'reg', 'set', '00'])
+        dev[0].request("DISCONNECT")
+        if hapd:
+            hapd.request("DISABLE")
+        subprocess.call(['iw', 'reg', 'set', '00'])
+        dev[0].flush_scan_cache()
 
 def test_ap_wps_conf_chan14(dev, apdev):
     """WPS PBC provisioning with configured AP on channel 14"""
     try:
+        hapd = None
         ssid = "test-wps-conf"
         params = { "ssid": ssid, "eap_server": "1", "wps_state": "2",
                    "wpa_passphrase": "12345678", "wpa": "2",
@@ -232,15 +232,17 @@ def test_ap_wps_conf_chan14(dev, apdev):
         logger.info("WPS provisioning step")
         hapd.request("WPS_PBC")
         dev[0].request("WPS_PBC")
-        ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
-        if ev is None:
-            raise Exception("Association with the AP timed out")
+        dev[0].wait_connected(timeout=30)
 
         sta = hapd.get_sta(dev[0].p2p_interface_addr())
         if 'wpsDeviceName' not in sta or sta['wpsDeviceName'] != "Device A":
             raise Exception("Device name not available in STA command")
     finally:
-        subprocess.call(['sudo', 'iw', 'reg', 'set', '00'])
+        dev[0].request("DISCONNECT")
+        if hapd:
+            hapd.request("DISABLE")
+        subprocess.call(['iw', 'reg', 'set', '00'])
+        dev[0].flush_scan_cache()
 
 def test_ap_wps_twice(dev, apdev):
     """WPS provisioning with twice to change passphrase"""
@@ -252,11 +254,10 @@ def test_ap_wps_twice(dev, apdev):
     hapd = hostapd.Hostapd(apdev[0]['ifname'])
     logger.info("WPS provisioning step")
     hapd.request("WPS_PBC")
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq="2412")
     dev[0].dump_monitor()
-    dev[0].request("WPS_PBC")
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
-    if ev is None:
-        raise Exception("Association with the AP timed out")
+    dev[0].request("WPS_PBC " + apdev[0]['bssid'])
+    dev[0].wait_connected(timeout=30)
     dev[0].request("DISCONNECT")
 
     logger.info("Restart AP with different passphrase and re-run WPS")
@@ -268,10 +269,8 @@ def test_ap_wps_twice(dev, apdev):
     logger.info("WPS provisioning step")
     hapd.request("WPS_PBC")
     dev[0].dump_monitor()
-    dev[0].request("WPS_PBC any")
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
-    if ev is None:
-        raise Exception("Association with the AP timed out")
+    dev[0].request("WPS_PBC " + apdev[0]['bssid'])
+    dev[0].wait_connected(timeout=30)
     networks = dev[0].list_networks()
     if len(networks) > 1:
         raise Exception("Unexpected duplicated network block present")
@@ -287,8 +286,9 @@ def test_ap_wps_incorrect_pin(dev, apdev):
 
     logger.info("WPS provisioning attempt 1")
     hapd.request("WPS_PIN any 12345670")
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq="2412")
     dev[0].dump_monitor()
-    dev[0].request("WPS_PIN any 55554444")
+    dev[0].request("WPS_PIN %s 55554444" % apdev[0]['bssid'])
     ev = dev[0].wait_event(["WPS-FAIL"], timeout=30)
     if ev is None:
         raise Exception("WPS operation timed out")
@@ -296,9 +296,7 @@ def test_ap_wps_incorrect_pin(dev, apdev):
         raise Exception("Incorrect config_error reported")
     if "msg=8" not in ev:
         raise Exception("PIN error detected on incorrect message")
-    ev = dev[0].wait_event(["CTRL-EVENT-DISCONNECTED"])
-    if ev is None:
-        raise Exception("Timeout on disconnection event")
+    dev[0].wait_disconnected(timeout=10)
     dev[0].request("WPS_CANCEL")
     # if a scan was in progress, wait for it to complete before trying WPS again
     ev = dev[0].wait_event(["CTRL-EVENT-SCAN-RESULTS"], 5)
@@ -310,7 +308,7 @@ def test_ap_wps_incorrect_pin(dev, apdev):
     logger.info("WPS provisioning attempt 2")
     hapd.request("WPS_PIN any 12345670")
     dev[0].dump_monitor()
-    dev[0].request("WPS_PIN any 12344444")
+    dev[0].request("WPS_PIN %s 12344444" % apdev[0]['bssid'])
     ev = dev[0].wait_event(["WPS-FAIL"], timeout=30)
     if ev is None:
         raise Exception("WPS operation timed out")
@@ -318,9 +316,7 @@ def test_ap_wps_incorrect_pin(dev, apdev):
         raise Exception("Incorrect config_error reported")
     if "msg=10" not in ev:
         raise Exception("PIN error detected on incorrect message")
-    ev = dev[0].wait_event(["CTRL-EVENT-DISCONNECTED"])
-    if ev is None:
-        raise Exception("Timeout on disconnection event")
+    dev[0].wait_disconnected(timeout=10)
 
 def test_ap_wps_conf_pin(dev, apdev):
     """WPS PIN provisioning with configured AP"""
@@ -333,11 +329,10 @@ def test_ap_wps_conf_pin(dev, apdev):
     logger.info("WPS provisioning step")
     pin = dev[0].wps_read_pin()
     hapd.request("WPS_PIN any " + pin)
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq="2412")
     dev[0].dump_monitor()
-    dev[0].request("WPS_PIN any " + pin)
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
-    if ev is None:
-        raise Exception("Association with the AP timed out")
+    dev[0].request("WPS_PIN %s %s" % (apdev[0]['bssid'], pin))
+    dev[0].wait_connected(timeout=30)
     status = dev[0].get_status()
     if status['wpa_state'] != 'COMPLETED' or status['bssid'] != apdev[0]['bssid']:
         raise Exception("Not fully connected")
@@ -353,16 +348,14 @@ def test_ap_wps_conf_pin(dev, apdev):
     if "[WPS-AUTH]" in bss['flags']:
         raise Exception("WPS-AUTH flag not cleared")
     logger.info("Try to connect from another station using the same PIN")
-    pin = dev[1].request("WPS_PIN any")
+    pin = dev[1].request("WPS_PIN " + apdev[0]['bssid'])
     ev = dev[1].wait_event(["WPS-M2D","CTRL-EVENT-CONNECTED"], timeout=30)
     if ev is None:
         raise Exception("Operation timed out")
     if "WPS-M2D" not in ev:
         raise Exception("Unexpected WPS operation started")
     hapd.request("WPS_PIN any " + pin)
-    ev = dev[1].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
-    if ev is None:
-        raise Exception("Association with the AP timed out")
+    dev[1].wait_connected(timeout=30)
 
 def test_ap_wps_conf_pin_v1(dev, apdev):
     """WPS PIN provisioning with configured WPS v1.0 AP"""
@@ -386,11 +379,9 @@ def test_ap_wps_conf_pin_v1(dev, apdev):
         hapd.request("SET wps_version_number 0x20")
         raise Exception("WPS-PIN flag not seen in scan results")
     dev[0].dump_monitor()
-    dev[0].request("WPS_PIN any " + pin)
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
+    dev[0].request("WPS_PIN %s %s" % (apdev[0]['bssid'], pin))
+    dev[0].wait_connected(timeout=30)
     hapd.request("SET wps_version_number 0x20")
-    if ev is None:
-        raise Exception("Association with the AP timed out")
 
 def test_ap_wps_conf_pin_2sta(dev, apdev):
     """Two stations trying to use WPS PIN at the same time"""
@@ -407,14 +398,12 @@ def test_ap_wps_conf_pin_2sta(dev, apdev):
     hapd.request("WPS_PIN " + dev[1].get_status_field("uuid") + " " + pin)
     dev[0].dump_monitor()
     dev[1].dump_monitor()
-    dev[0].request("WPS_PIN any " + pin)
-    dev[1].request("WPS_PIN any " + pin)
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
-    if ev is None:
-        raise Exception("Association with the AP timed out")
-    ev = dev[1].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
-    if ev is None:
-        raise Exception("Association with the AP timed out")
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq="2412")
+    dev[1].scan_for_bss(apdev[0]['bssid'], freq="2412")
+    dev[0].request("WPS_PIN %s %s" % (apdev[0]['bssid'], pin))
+    dev[1].request("WPS_PIN %s %s" % (apdev[0]['bssid'], pin))
+    dev[0].wait_connected(timeout=30)
+    dev[1].wait_connected(timeout=30)
 
 def test_ap_wps_conf_pin_timeout(dev, apdev):
     """WPS PIN provisioning with configured AP timing out PIN"""
@@ -429,8 +418,9 @@ def test_ap_wps_conf_pin_timeout(dev, apdev):
     if "FAIL" not in hapd.request("WPS_PIN "):
         raise Exception("Unexpected success on invalid WPS_PIN")
     hapd.request("WPS_PIN any " + pin + " 1")
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq="2412")
     time.sleep(1.1)
-    dev[0].request("WPS_PIN any " + pin)
+    dev[0].request("WPS_PIN %s %s" % (apdev[0]['bssid'], pin))
     ev = hapd.wait_event(["WPS-PIN-NEEDED"], timeout=20)
     if ev is None:
         raise Exception("WPS-PIN-NEEDED event timed out")
@@ -440,10 +430,8 @@ def test_ap_wps_conf_pin_timeout(dev, apdev):
     dev[0].request("WPS_CANCEL")
 
     hapd.request("WPS_PIN any " + pin + " 20 " + addr)
-    dev[0].request("WPS_PIN any " + pin)
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
-    if ev is None:
-        raise Exception("Association with the AP timed out")
+    dev[0].request("WPS_PIN %s %s" % (apdev[0]['bssid'], pin))
+    dev[0].wait_connected(timeout=30)
 
 def test_ap_wps_reg_connect(dev, apdev):
     """WPS registrar using AP PIN to connect"""
@@ -456,6 +444,7 @@ def test_ap_wps_reg_connect(dev, apdev):
                      "ap_pin": appin})
     logger.info("WPS provisioning step")
     dev[0].dump_monitor()
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq=2412)
     dev[0].wps_reg(apdev[0]['bssid'], appin)
     status = dev[0].get_status()
     if status['wpa_state'] != 'COMPLETED' or status['bssid'] != apdev[0]['bssid']:
@@ -463,6 +452,27 @@ def test_ap_wps_reg_connect(dev, apdev):
     if status['ssid'] != ssid:
         raise Exception("Unexpected SSID")
     if status['pairwise_cipher'] != 'CCMP' or status['group_cipher'] != 'CCMP':
+        raise Exception("Unexpected encryption configuration")
+    if status['key_mgmt'] != 'WPA2-PSK':
+        raise Exception("Unexpected key_mgmt")
+
+def test_ap_wps_reg_connect_mixed_mode(dev, apdev):
+    """WPS registrar using AP PIN to connect (WPA+WPA2)"""
+    ssid = "test-wps-reg-ap-pin"
+    appin = "12345670"
+    hostapd.add_ap(apdev[0]['ifname'],
+                   { "ssid": ssid, "eap_server": "1", "wps_state": "2",
+                     "wpa_passphrase": "12345678", "wpa": "3",
+                     "wpa_key_mgmt": "WPA-PSK", "rsn_pairwise": "CCMP",
+                     "wpa_pairwise": "TKIP", "ap_pin": appin})
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq=2412)
+    dev[0].wps_reg(apdev[0]['bssid'], appin)
+    status = dev[0].get_status()
+    if status['wpa_state'] != 'COMPLETED' or status['bssid'] != apdev[0]['bssid']:
+        raise Exception("Not fully connected")
+    if status['ssid'] != ssid:
+        raise Exception("Unexpected SSID")
+    if status['pairwise_cipher'] != 'CCMP' or status['group_cipher'] != 'TKIP':
         raise Exception("Unexpected encryption configuration")
     if status['key_mgmt'] != 'WPA2-PSK':
         raise Exception("Unexpected key_mgmt")
@@ -498,10 +508,12 @@ def test_ap_wps_random_ap_pin(dev, apdev):
     if appin not in hapd.request("WPS_AP_PIN get"):
         raise Exception("Could not fetch current AP PIN")
     logger.info("WPS provisioning step")
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq=2412)
     dev[0].wps_reg(apdev[0]['bssid'], appin)
 
     hapd.request("WPS_AP_PIN disable")
     logger.info("WPS provisioning step with AP PIN disabled")
+    dev[1].scan_for_bss(apdev[0]['bssid'], freq=2412)
     check_wps_reg_failure(dev[1], apdev[0], appin)
 
     logger.info("WPS provisioning step with AP PIN reset")
@@ -510,8 +522,8 @@ def test_ap_wps_random_ap_pin(dev, apdev):
     dev[1].wps_reg(apdev[0]['bssid'], appin)
     dev[0].request("REMOVE_NETWORK all")
     dev[1].request("REMOVE_NETWORK all")
-    dev[0].wait_event(["CTRL-EVENT-DISCONNECTED"])
-    dev[1].wait_event(["CTRL-EVENT-DISCONNECTED"])
+    dev[0].wait_disconnected(timeout=10)
+    dev[1].wait_disconnected(timeout=10)
 
     logger.info("WPS provisioning step after AP PIN timeout")
     hapd.request("WPS_AP_PIN disable")
@@ -538,6 +550,7 @@ def test_ap_wps_reg_config(dev, apdev):
                    { "ssid": ssid, "eap_server": "1", "wps_state": "2",
                      "ap_pin": appin})
     logger.info("WPS configuration step")
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq=2412)
     dev[0].dump_monitor()
     new_ssid = "wps-new-ssid"
     new_passphrase = "1234567890"
@@ -555,11 +568,7 @@ def test_ap_wps_reg_config(dev, apdev):
 
     logger.info("Re-configure back to open")
     dev[0].request("REMOVE_NETWORK all")
-    dev[0].request("BSS_FLUSH 0")
-    dev[0].request("SCAN freq=2412 only_new=1")
-    ev = dev[0].wait_event(["CTRL-EVENT-SCAN-RESULTS"], 15)
-    if ev is None:
-        raise Exception("Scan timed out")
+    dev[0].flush_scan_cache()
     dev[0].dump_monitor()
     dev[0].wps_reg(apdev[0]['bssid'], appin, "wps-open", "OPEN", "NONE", "")
     status = dev[0].get_status()
@@ -577,6 +586,7 @@ def test_ap_wps_reg_config_ext_processing(dev, apdev):
     params = { "ssid": ssid, "eap_server": "1", "wps_state": "2",
                "wps_cred_processing": "1", "ap_pin": appin}
     hapd = hostapd.add_ap(apdev[0]['ifname'], params)
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq=2412)
     new_ssid = "wps-new-ssid"
     new_passphrase = "1234567890"
     dev[0].wps_reg(apdev[0]['bssid'], appin, new_ssid, "WPA2PSK", "CCMP",
@@ -592,9 +602,7 @@ def test_ap_wps_reg_config_ext_processing(dev, apdev):
     hapd.request("SET wps_cred_processing 0")
     if "FAIL" in hapd.request("WPS_CONFIG " + new_ssid.encode("hex") + " WPA2PSK CCMP " + new_passphrase.encode("hex")):
         raise Exception("WPS_CONFIG command failed")
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=15)
-    if ev is None:
-        raise Exception("Association with the AP timed out")
+    dev[0].wait_connected(timeout=15)
 
 def test_ap_wps_reg_config_tkip(dev, apdev):
     """WPS registrar configuring AP to use TKIP and AP upgrading to TKIP+CCMP"""
@@ -605,6 +613,7 @@ def test_ap_wps_reg_config_tkip(dev, apdev):
                      "ap_pin": appin})
     logger.info("WPS configuration step")
     dev[0].request("SET wps_version_number 0x10")
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq=2412)
     dev[0].dump_monitor()
     new_ssid = "wps-new-ssid-with-tkip"
     new_passphrase = "1234567890"
@@ -618,7 +627,7 @@ def test_ap_wps_reg_config_tkip(dev, apdev):
     dev[0].connect_network(id)
     status = dev[0].get_status()
     if status['wpa_state'] != 'COMPLETED' or status['bssid'] != apdev[0]['bssid']:
-        raise Exception("Not fully connected")
+        raise Exception("Not fully connected: wpa_state={} bssid={}".format(status['wpa_state'], status['bssid']))
     if status['ssid'] != new_ssid:
         raise Exception("Unexpected SSID")
     if status['pairwise_cipher'] != 'CCMP' or status['group_cipher'] != 'TKIP':
@@ -638,6 +647,7 @@ def test_ap_wps_setup_locked(dev, apdev):
     new_ssid = "wps-new-ssid-test"
     new_passphrase = "1234567890"
 
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq=2412)
     ap_setup_locked=False
     for pin in ["55554444", "1234", "12345678", "00000000", "11111111"]:
         dev[0].dump_monitor()
@@ -654,9 +664,7 @@ def test_ap_wps_setup_locked(dev, apdev):
             ap_setup_locked=True
         elif "config_error=18" not in ev:
             raise Exception("config_error=18 not reported")
-        ev = dev[0].wait_event(["CTRL-EVENT-DISCONNECTED"])
-        if ev is None:
-            raise Exception("Timeout on disconnection event")
+        dev[0].wait_disconnected(timeout=10)
         time.sleep(0.1)
     if not ap_setup_locked:
         raise Exception("AP setup was not locked")
@@ -674,13 +682,11 @@ def test_ap_wps_setup_locked(dev, apdev):
     pin = dev[0].wps_read_pin()
     hapd = hostapd.Hostapd(apdev[0]['ifname'])
     hapd.request("WPS_PIN any " + pin)
-    dev[0].request("WPS_PIN any " + pin)
+    dev[0].request("WPS_PIN %s %s" % (apdev[0]['bssid'], pin))
     ev = dev[0].wait_event(["WPS-SUCCESS"], timeout=30)
     if ev is None:
         raise Exception("WPS success was not reported")
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
-    if ev is None:
-        raise Exception("Association with the AP timed out")
+    dev[0].wait_connected(timeout=30)
 
     appin = hapd.request("WPS_AP_PIN random")
     if "FAIL" in appin:
@@ -701,13 +707,14 @@ def test_ap_wps_setup_locked_timeout(dev, apdev):
     new_ssid = "wps-new-ssid-test"
     new_passphrase = "1234567890"
 
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq=2412)
     ap_setup_locked=False
     for pin in ["55554444", "1234", "12345678", "00000000", "11111111"]:
         dev[0].dump_monitor()
         logger.info("Try incorrect AP PIN - attempt " + pin)
         dev[0].wps_reg(apdev[0]['bssid'], pin, new_ssid, "WPA2PSK",
                        "CCMP", new_passphrase, no_wait=True)
-        ev = dev[0].wait_event(["WPS-FAIL", "CTRL-EVENT-CONNECTED"])
+        ev = dev[0].wait_event(["WPS-FAIL", "CTRL-EVENT-CONNECTED"], timeout=15)
         if ev is None:
             raise Exception("Timeout on receiving WPS operation failure event")
         if "CTRL-EVENT-CONNECTED" in ev:
@@ -718,9 +725,7 @@ def test_ap_wps_setup_locked_timeout(dev, apdev):
             break
         elif "config_error=18" not in ev:
             raise Exception("config_error=18 not reported")
-        ev = dev[0].wait_event(["CTRL-EVENT-DISCONNECTED"])
-        if ev is None:
-            raise Exception("Timeout on disconnection event")
+        dev[0].wait_disconnected(timeout=10)
         time.sleep(0.1)
     if not ap_setup_locked:
         raise Exception("AP setup was not locked")
@@ -763,10 +768,12 @@ def test_ap_wps_pbc_overlap_2sta(dev, apdev):
     hapd = hostapd.Hostapd(apdev[0]['ifname'])
     logger.info("WPS provisioning step")
     hapd.request("WPS_PBC")
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq="2412")
     dev[0].dump_monitor()
+    dev[1].scan_for_bss(apdev[0]['bssid'], freq="2412")
     dev[1].dump_monitor()
-    dev[0].request("WPS_PBC")
-    dev[1].request("WPS_PBC")
+    dev[0].request("WPS_PBC " + apdev[0]['bssid'])
+    dev[1].request("WPS_PBC " + apdev[0]['bssid'])
     ev = dev[0].wait_event(["WPS-M2D"], timeout=15)
     if ev is None:
         raise Exception("PBC session overlap not detected (dev0)")
@@ -824,6 +831,12 @@ def test_ap_wps_cancel(dev, apdev):
 
 def test_ap_wps_er_add_enrollee(dev, apdev):
     """WPS ER configuring AP and adding a new enrollee using PIN"""
+    try:
+        _test_ap_wps_er_add_enrollee(dev, apdev)
+    finally:
+        dev[0].request("WPS_ER_STOP")
+
+def _test_ap_wps_er_add_enrollee(dev, apdev):
     ssid = "wps-er-add-enrollee"
     ap_pin = "12345670"
     ap_uuid = "27ea801a-9e5c-4e73-bd82-f89cbcd10d7e"
@@ -838,6 +851,7 @@ def test_ap_wps_er_add_enrollee(dev, apdev):
     logger.info("WPS configuration step")
     new_passphrase = "1234567890"
     dev[0].dump_monitor()
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq=2412)
     dev[0].wps_reg(apdev[0]['bssid'], ap_pin, ssid, "WPA2PSK", "CCMP",
                    new_passphrase)
     status = dev[0].get_status()
@@ -870,19 +884,22 @@ def test_ap_wps_er_add_enrollee(dev, apdev):
         raise Exception("Expected SSID not in settings")
     if "key=" + new_passphrase not in ev:
         raise Exception("Expected passphrase not in settings")
+    ev = dev[0].wait_event(["WPS-FAIL"], timeout=15)
+    if ev is None:
+        raise Exception("WPS-FAIL after AP learn timed out")
+    time.sleep(0.1)
 
     logger.info("Add Enrollee using ER")
     pin = dev[1].wps_read_pin()
     dev[0].dump_monitor()
     dev[0].request("WPS_ER_PIN any " + pin + " " + dev[1].p2p_interface_addr())
+    dev[1].scan_for_bss(apdev[0]['bssid'], freq=2412)
     dev[1].dump_monitor()
-    dev[1].request("WPS_PIN any " + pin)
+    dev[1].request("WPS_PIN %s %s" % (apdev[0]['bssid'], pin))
     ev = dev[1].wait_event(["WPS-SUCCESS"], timeout=30)
     if ev is None:
         raise Exception("Enrollee did not report success")
-    ev = dev[1].wait_event(["CTRL-EVENT-CONNECTED"], timeout=15)
-    if ev is None:
-        raise Exception("Association with the AP timed out")
+    dev[1].wait_connected(timeout=15)
     ev = dev[0].wait_event(["WPS-SUCCESS"], timeout=15)
     if ev is None:
         raise Exception("WPS ER did not report success")
@@ -892,17 +909,16 @@ def test_ap_wps_er_add_enrollee(dev, apdev):
     pin = dev[2].wps_read_pin()
     addr2 = dev[2].p2p_interface_addr()
     dev[0].dump_monitor()
+    dev[2].scan_for_bss(apdev[0]['bssid'], freq=2412)
     dev[2].dump_monitor()
-    dev[2].request("WPS_PIN any " + pin)
+    dev[2].request("WPS_PIN %s %s" % (apdev[0]['bssid'], pin))
     ev = dev[0].wait_event(["WPS-ER-ENROLLEE-ADD"], timeout=10)
     if ev is None:
         raise Exception("Enrollee not seen")
     if addr2 not in ev:
         raise Exception("Unexpected Enrollee MAC address")
     dev[0].request("WPS_ER_PIN " + addr2 + " " + pin + " " + addr2)
-    ev = dev[2].wait_event(["CTRL-EVENT-CONNECTED"], timeout=15)
-    if ev is None:
-        raise Exception("Association with the AP timed out")
+    dev[2].wait_connected(timeout=30)
     ev = dev[0].wait_event(["WPS-SUCCESS"], timeout=15)
     if ev is None:
         raise Exception("WPS ER did not report success")
@@ -910,12 +926,17 @@ def test_ap_wps_er_add_enrollee(dev, apdev):
     logger.info("Verify registrar selection behavior")
     dev[0].request("WPS_ER_PIN any " + pin + " " + dev[1].p2p_interface_addr())
     dev[1].request("DISCONNECT")
-    dev[1].wait_event(["CTRL-EVENT-DISCONNECTED"])
+    dev[1].wait_disconnected(timeout=10)
     dev[1].scan_for_bss(apdev[0]['bssid'], freq="2412")
     dev[1].scan(freq="2412")
     bss = dev[1].get_bss(apdev[0]['bssid'])
     if "[WPS-AUTH]" not in bss['flags']:
-        raise Exception("WPS-AUTH flag missing")
+        # It is possible for scan to miss an update especially when running
+        # tests under load with multiple VMs, so allow another attempt.
+        dev[1].scan(freq="2412")
+        bss = dev[1].get_bss(apdev[0]['bssid'])
+        if "[WPS-AUTH]" not in bss['flags']:
+            raise Exception("WPS-AUTH flag missing")
 
     logger.info("Stop ER")
     dev[0].dump_monitor()
@@ -940,6 +961,12 @@ def test_ap_wps_er_add_enrollee(dev, apdev):
 
 def test_ap_wps_er_add_enrollee_pbc(dev, apdev):
     """WPS ER connected to AP and adding a new enrollee using PBC"""
+    try:
+        _test_ap_wps_er_add_enrollee_pbc(dev, apdev)
+    finally:
+        dev[0].request("WPS_ER_STOP")
+
+def _test_ap_wps_er_add_enrollee_pbc(dev, apdev):
     ssid = "wps-er-add-enrollee-pbc"
     ap_pin = "12345670"
     ap_uuid = "27ea801a-9e5c-4e73-bd82-f89cbcd10d7e"
@@ -954,6 +981,7 @@ def test_ap_wps_er_add_enrollee_pbc(dev, apdev):
                      "config_methods": "label push_button",
                      "ap_pin": ap_pin, "uuid": ap_uuid, "upnp_iface": "lo"})
     logger.info("Learn AP configuration")
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq=2412)
     dev[0].dump_monitor()
     dev[0].wps_reg(apdev[0]['bssid'], ap_pin)
     status = dev[0].get_status()
@@ -968,12 +996,13 @@ def test_ap_wps_er_add_enrollee_pbc(dev, apdev):
     if ap_uuid not in ev:
         raise Exception("Expected AP UUID not found")
 
-    logger.info("Use learned network configuration on ER")
-    dev[0].request("WPS_ER_SET_CONFIG " + ap_uuid + " 0")
+    enrollee = dev[1].p2p_interface_addr()
+
+    if "FAIL-UNKNOWN-UUID" not in dev[0].request("WPS_ER_PBC " + enrollee):
+        raise Exception("Unknown UUID not reported")
 
     logger.info("Add Enrollee using ER and PBC")
     dev[0].dump_monitor()
-    enrollee = dev[1].p2p_interface_addr()
     dev[1].dump_monitor()
     dev[1].request("WPS_PBC")
 
@@ -985,25 +1014,105 @@ def test_ap_wps_er_add_enrollee_pbc(dev, apdev):
             break
         if i == 1:
             raise Exception("Expected Enrollee not found")
-    dev[0].request("WPS_ER_PBC " + enrollee)
+    if "FAIL-NO-AP-SETTINGS" not in dev[0].request("WPS_ER_PBC " + enrollee):
+        raise Exception("Unknown UUID not reported")
+    logger.info("Use learned network configuration on ER")
+    dev[0].request("WPS_ER_SET_CONFIG " + ap_uuid + " 0")
+    if "OK" not in dev[0].request("WPS_ER_PBC " + enrollee):
+        raise Exception("WPS_ER_PBC failed")
 
     ev = dev[1].wait_event(["WPS-SUCCESS"], timeout=15)
     if ev is None:
         raise Exception("Enrollee did not report success")
-    ev = dev[1].wait_event(["CTRL-EVENT-CONNECTED"], timeout=15)
-    if ev is None:
-        raise Exception("Association with the AP timed out")
+    dev[1].wait_connected(timeout=15)
     ev = dev[0].wait_event(["WPS-SUCCESS"], timeout=15)
     if ev is None:
         raise Exception("WPS ER did not report success")
     hwsim_utils.test_connectivity_sta(dev[0], dev[1])
 
+def test_ap_wps_er_pbc_overlap(dev, apdev):
+    """WPS ER connected to AP and PBC session overlap"""
+    try:
+        _test_ap_wps_er_pbc_overlap(dev, apdev)
+    finally:
+        dev[0].request("WPS_ER_STOP")
+
+def _test_ap_wps_er_pbc_overlap(dev, apdev):
+    ssid = "wps-er-add-enrollee-pbc"
+    ap_pin = "12345670"
+    ap_uuid = "27ea801a-9e5c-4e73-bd82-f89cbcd10d7e"
+    hostapd.add_ap(apdev[0]['ifname'],
+                   { "ssid": ssid, "eap_server": "1", "wps_state": "2",
+                     "wpa_passphrase": "12345678", "wpa": "2",
+                     "wpa_key_mgmt": "WPA-PSK", "rsn_pairwise": "CCMP",
+                     "device_name": "Wireless AP", "manufacturer": "Company",
+                     "model_name": "WAP", "model_number": "123",
+                     "serial_number": "12345", "device_type": "6-0050F204-1",
+                     "os_version": "01020300",
+                     "config_methods": "label push_button",
+                     "ap_pin": ap_pin, "uuid": ap_uuid, "upnp_iface": "lo"})
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq=2412)
+    dev[0].dump_monitor()
+    dev[0].wps_reg(apdev[0]['bssid'], ap_pin)
+
+    dev[1].scan_for_bss(apdev[0]['bssid'], freq="2412")
+    dev[2].scan_for_bss(apdev[0]['bssid'], freq="2412")
+    # avoid leaving dev 1 or 2 as the last Probe Request to the AP
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq=2412, force_scan=True)
+
+    dev[0].dump_monitor()
+    dev[0].request("WPS_ER_START ifname=lo")
+
+    ev = dev[0].wait_event(["WPS-ER-AP-ADD"], timeout=15)
+    if ev is None:
+        raise Exception("AP discovery timed out")
+    if ap_uuid not in ev:
+        raise Exception("Expected AP UUID not found")
+
     # verify BSSID selection of the AP instead of UUID
     if "FAIL" in dev[0].request("WPS_ER_SET_CONFIG " + apdev[0]['bssid'] + " 0"):
         raise Exception("Could not select AP based on BSSID")
 
+    dev[0].dump_monitor()
+    dev[1].request("WPS_PBC " + apdev[0]['bssid'])
+    dev[2].request("WPS_PBC " + apdev[0]['bssid'])
+    ev = dev[1].wait_event(["CTRL-EVENT-SCAN-RESULTS"], timeout=10)
+    if ev is None:
+        raise Exception("PBC scan failed")
+    ev = dev[2].wait_event(["CTRL-EVENT-SCAN-RESULTS"], timeout=10)
+    if ev is None:
+        raise Exception("PBC scan failed")
+    found1 = False
+    found2 = False
+    addr1 = dev[1].own_addr()
+    addr2 = dev[2].own_addr()
+    for i in range(3):
+        ev = dev[0].wait_event(["WPS-ER-ENROLLEE-ADD"], timeout=15)
+        if ev is None:
+            raise Exception("Enrollee discovery timed out")
+        if addr1 in ev:
+            found1 = True
+            if found2:
+                break
+        if addr2 in ev:
+            found2 = True
+            if found1:
+                break
+    if dev[0].request("WPS_ER_PBC " + ap_uuid) != "FAIL-PBC-OVERLAP\n":
+        raise Exception("PBC overlap not reported")
+    dev[1].request("WPS_CANCEL")
+    dev[2].request("WPS_CANCEL")
+    if dev[0].request("WPS_ER_PBC foo") != "FAIL\n":
+        raise Exception("Invalid WPS_ER_PBC accepted")
+
 def test_ap_wps_er_v10_add_enrollee_pin(dev, apdev):
     """WPS v1.0 ER connected to AP and adding a new enrollee using PIN"""
+    try:
+        _test_ap_wps_er_v10_add_enrollee_pin(dev, apdev)
+    finally:
+        dev[0].request("WPS_ER_STOP")
+
+def _test_ap_wps_er_v10_add_enrollee_pin(dev, apdev):
     ssid = "wps-er-add-enrollee-pbc"
     ap_pin = "12345670"
     ap_uuid = "27ea801a-9e5c-4e73-bd82-f89cbcd10d7e"
@@ -1019,6 +1128,7 @@ def test_ap_wps_er_v10_add_enrollee_pin(dev, apdev):
                      "ap_pin": ap_pin, "uuid": ap_uuid, "upnp_iface": "lo"})
     logger.info("Learn AP configuration")
     dev[0].request("SET wps_version_number 0x10")
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq=2412)
     dev[0].dump_monitor()
     dev[0].wps_reg(apdev[0]['bssid'], ap_pin)
     status = dev[0].get_status()
@@ -1041,17 +1151,22 @@ def test_ap_wps_er_v10_add_enrollee_pin(dev, apdev):
     pin = dev[1].wps_read_pin()
     dev[0].dump_monitor()
     dev[0].request("WPS_ER_PIN any " + pin + " " + enrollee)
+    dev[1].scan_for_bss(apdev[0]['bssid'], freq=2412)
     dev[1].dump_monitor()
-    dev[1].request("WPS_PIN any " + pin)
-    ev = dev[1].wait_event(["CTRL-EVENT-CONNECTED"], timeout=15)
-    if ev is None:
-        raise Exception("Association with the AP timed out")
+    dev[1].request("WPS_PIN %s %s" % (apdev[0]['bssid'], pin))
+    dev[1].wait_connected(timeout=30)
     ev = dev[0].wait_event(["WPS-SUCCESS"], timeout=15)
     if ev is None:
         raise Exception("WPS ER did not report success")
 
 def test_ap_wps_er_config_ap(dev, apdev):
     """WPS ER configuring AP over UPnP"""
+    try:
+        _test_ap_wps_er_config_ap(dev, apdev)
+    finally:
+        dev[0].request("WPS_ER_STOP")
+
+def _test_ap_wps_er_config_ap(dev, apdev):
     ssid = "wps-er-ap-config"
     ap_pin = "12345670"
     ap_uuid = "27ea801a-9e5c-4e73-bd82-f89cbcd10d7e"
@@ -1083,8 +1198,20 @@ def test_ap_wps_er_config_ap(dev, apdev):
     ev = dev[0].wait_event(["WPS-SUCCESS"])
     if ev is None:
         raise Exception("WPS ER configuration operation timed out")
-    dev[1].wait_event(["CTRL-EVENT-DISCONNECTED"])
+    dev[0].wait_disconnected(timeout=10)
     dev[0].connect(ssid, psk="1234567890", scan_freq="2412")
+
+    logger.info("WPS ER restart")
+    dev[0].request("WPS_ER_START")
+    ev = dev[0].wait_event(["WPS-ER-AP-ADD"], timeout=15)
+    if ev is None:
+        raise Exception("AP discovery timed out on ER restart")
+    if ap_uuid not in ev:
+        raise Exception("Expected AP UUID not found on ER restart")
+    if "OK" not in dev[0].request("WPS_ER_STOP"):
+        raise Exception("WPS_ER_STOP failed")
+    if "OK" not in dev[0].request("WPS_ER_STOP"):
+        raise Exception("WPS_ER_STOP failed")
 
 def test_ap_wps_fragmentation(dev, apdev):
     """WPS with fragmentation in EAP-WSC and mixed mode WPA+WPA2"""
@@ -1099,12 +1226,11 @@ def test_ap_wps_fragmentation(dev, apdev):
     hapd = hostapd.Hostapd(apdev[0]['ifname'])
     logger.info("WPS provisioning step (PBC)")
     hapd.request("WPS_PBC")
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq=2412)
     dev[0].dump_monitor()
     dev[0].request("SET wps_fragment_size 50")
-    dev[0].request("WPS_PBC")
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
-    if ev is None:
-        raise Exception("Association with the AP timed out")
+    dev[0].request("WPS_PBC " + apdev[0]['bssid'])
+    dev[0].wait_connected(timeout=30)
     status = dev[0].get_status()
     if status['wpa_state'] != 'COMPLETED':
         raise Exception("Not fully connected")
@@ -1116,11 +1242,10 @@ def test_ap_wps_fragmentation(dev, apdev):
     logger.info("WPS provisioning step (PIN)")
     pin = dev[1].wps_read_pin()
     hapd.request("WPS_PIN any " + pin)
+    dev[1].scan_for_bss(apdev[0]['bssid'], freq=2412)
     dev[1].request("SET wps_fragment_size 50")
-    dev[1].request("WPS_PIN any " + pin)
-    ev = dev[1].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
-    if ev is None:
-        raise Exception("Association with the AP timed out")
+    dev[1].request("WPS_PIN %s %s" % (apdev[0]['bssid'], pin))
+    dev[1].wait_connected(timeout=30)
     status = dev[1].get_status()
     if status['wpa_state'] != 'COMPLETED':
         raise Exception("Not fully connected")
@@ -1130,6 +1255,7 @@ def test_ap_wps_fragmentation(dev, apdev):
         raise Exception("Unexpected key_mgmt")
 
     logger.info("WPS connection as registrar")
+    dev[2].scan_for_bss(apdev[0]['bssid'], freq=2412)
     dev[2].request("SET wps_fragment_size 50")
     dev[2].wps_reg(apdev[0]['bssid'], appin)
     status = dev[2].get_status()
@@ -1150,13 +1276,12 @@ def test_ap_wps_new_version_sta(dev, apdev):
     hapd = hostapd.Hostapd(apdev[0]['ifname'])
     logger.info("WPS provisioning step")
     hapd.request("WPS_PBC")
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq="2412")
     dev[0].dump_monitor()
     dev[0].request("SET wps_version_number 0x43")
     dev[0].request("SET wps_vendor_ext_m1 000137100100020001")
-    dev[0].request("WPS_PBC")
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
-    if ev is None:
-        raise Exception("Association with the AP timed out")
+    dev[0].request("WPS_PBC " + apdev[0]['bssid'])
+    dev[0].wait_connected(timeout=30)
 
 def test_ap_wps_new_version_ap(dev, apdev):
     """WPS compatibility with new version number on the AP"""
@@ -1170,12 +1295,11 @@ def test_ap_wps_new_version_ap(dev, apdev):
     if "FAIL" in hapd.request("SET wps_version_number 0x43"):
         raise Exception("Failed to enable test functionality")
     hapd.request("WPS_PBC")
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq="2412")
     dev[0].dump_monitor()
-    dev[0].request("WPS_PBC")
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
+    dev[0].request("WPS_PBC " + apdev[0]['bssid'])
+    dev[0].wait_connected(timeout=30)
     hapd.request("SET wps_version_number 0x20")
-    if ev is None:
-        raise Exception("Association with the AP timed out")
 
 def test_ap_wps_check_pin(dev, apdev):
     """Verify PIN checking through control interface"""
@@ -1217,6 +1341,7 @@ def test_ap_wps_wep_config(dev, apdev):
                    { "ssid": ssid, "eap_server": "1", "wps_state": "2",
                      "ap_pin": appin})
     hapd = hostapd.Hostapd(apdev[0]['ifname'])
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq=2412)
     dev[0].wps_reg(apdev[0]['bssid'], appin, "wps-new-ssid-wep", "OPEN", "WEP",
                    "hello", no_wait=True)
     ev = hapd.wait_event(["WPS-FAIL"], timeout=15)
@@ -1240,7 +1365,8 @@ def test_ap_wps_wep_enroll(dev, apdev):
                      "skip_cred_build": "1", "extra_cred": "wps-wep-cred" })
     hapd = hostapd.Hostapd(apdev[0]['ifname'])
     hapd.request("WPS_PBC")
-    dev[0].request("WPS_PBC")
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq=2412)
+    dev[0].request("WPS_PBC " + apdev[0]['bssid'])
     ev = dev[0].wait_event(["WPS-FAIL"], timeout=15)
     if ev is None:
         raise Exception("WPS-FAIL event timed out")
@@ -1261,10 +1387,9 @@ def test_ap_wps_ie_fragmentation(dev, apdev):
     hostapd.add_ap(apdev[0]['ifname'], params)
     hapd = hostapd.Hostapd(apdev[0]['ifname'])
     hapd.request("WPS_PBC")
-    dev[0].request("WPS_PBC")
-    ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
-    if ev is None:
-        raise Exception("Association with the AP timed out")
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq="2412")
+    dev[0].request("WPS_PBC " + apdev[0]['bssid'])
+    dev[0].wait_connected(timeout=30)
     bss = dev[0].get_bss(apdev[0]['bssid'])
     if "wps_device_name" not in bss or bss['wps_device_name'] != "1234567890abcdef1234567890abcdef":
         logger.info("Device Name not received correctly")
@@ -1294,9 +1419,9 @@ def get_psk(pskfile):
 
 def test_ap_wps_per_station_psk(dev, apdev):
     """WPS PBC provisioning with per-station PSK"""
-    addr0 = dev[0].p2p_dev_addr()
-    addr1 = dev[1].p2p_dev_addr()
-    addr2 = dev[2].p2p_dev_addr()
+    addr0 = dev[0].own_addr()
+    addr1 = dev[1].own_addr()
+    addr2 = dev[2].own_addr()
     ssid = "wps"
     appin = "12345670"
     pskfile = "/tmp/ap_wps_per_enrollee_psk.psk_file"
@@ -1317,19 +1442,18 @@ def test_ap_wps_per_station_psk(dev, apdev):
 
         logger.info("First enrollee")
         hapd.request("WPS_PBC")
-        dev[0].request("WPS_PBC")
-        ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"])
-        if ev is None:
-            raise Exception("Association with the AP timed out (1)")
+        dev[0].scan_for_bss(apdev[0]['bssid'], freq=2412)
+        dev[0].request("WPS_PBC " + apdev[0]['bssid'])
+        dev[0].wait_connected(timeout=30)
 
         logger.info("Second enrollee")
         hapd.request("WPS_PBC")
-        dev[1].request("WPS_PBC")
-        ev = dev[1].wait_event(["CTRL-EVENT-CONNECTED"])
-        if ev is None:
-            raise Exception("Association with the AP timed out (2)")
+        dev[1].scan_for_bss(apdev[0]['bssid'], freq=2412)
+        dev[1].request("WPS_PBC " + apdev[0]['bssid'])
+        dev[1].wait_connected(timeout=30)
 
         logger.info("External registrar")
+        dev[2].scan_for_bss(apdev[0]['bssid'], freq=2412)
         dev[2].wps_reg(apdev[0]['bssid'], appin)
 
         logger.info("Verifying PSK results")
@@ -1349,6 +1473,7 @@ def test_ap_wps_per_station_psk(dev, apdev):
 
         dev[0].request("REMOVE_NETWORK all")
         logger.info("Second external registrar")
+        dev[0].scan_for_bss(apdev[0]['bssid'], freq=2412)
         dev[0].wps_reg(apdev[0]['bssid'], appin)
         psks2 = get_psk(pskfile)
         if addr0 not in psks2:
@@ -1385,19 +1510,18 @@ def test_ap_wps_per_station_psk_failure(dev, apdev):
 
         logger.info("First enrollee")
         hapd.request("WPS_PBC")
-        dev[0].request("WPS_PBC")
-        ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"])
-        if ev is None:
-            raise Exception("Association with the AP timed out (1)")
+        dev[0].scan_for_bss(apdev[0]['bssid'], freq=2412)
+        dev[0].request("WPS_PBC " + apdev[0]['bssid'])
+        dev[0].wait_connected(timeout=30)
 
         logger.info("Second enrollee")
         hapd.request("WPS_PBC")
-        dev[1].request("WPS_PBC")
-        ev = dev[1].wait_event(["CTRL-EVENT-CONNECTED"])
-        if ev is None:
-            raise Exception("Association with the AP timed out (2)")
+        dev[1].scan_for_bss(apdev[0]['bssid'], freq=2412)
+        dev[1].request("WPS_PBC " + apdev[0]['bssid'])
+        dev[1].wait_connected(timeout=30)
 
         logger.info("External registrar")
+        dev[2].scan_for_bss(apdev[0]['bssid'], freq=2412)
         dev[2].wps_reg(apdev[0]['bssid'], appin)
 
         logger.info("Verifying PSK results")
@@ -1412,7 +1536,7 @@ def test_ap_wps_pin_request_file(dev, apdev):
     ssid = "wps"
     pinfile = "/tmp/ap_wps_pin_request_file.log"
     if os.path.exists(pinfile):
-        subprocess.call(['sudo', 'rm', pinfile])
+        os.remove(pinfile)
     hostapd.add_ap(apdev[0]['ifname'],
                    { "ssid": ssid, "eap_server": "1", "wps_state": "2",
                      "wps_pin_requests": pinfile,
@@ -1422,7 +1546,8 @@ def test_ap_wps_pin_request_file(dev, apdev):
     uuid = dev[0].get_status_field("uuid")
     pin = dev[0].wps_read_pin()
     try:
-        dev[0].request("WPS_PIN any " + pin)
+        dev[0].scan_for_bss(apdev[0]['bssid'], freq="2412")
+        dev[0].request("WPS_PIN %s %s" % (apdev[0]['bssid'], pin))
         ev = hapd.wait_event(["WPS-PIN-NEEDED"], timeout=15)
         if ev is None:
             raise Exception("PIN needed event not shown")
@@ -1439,7 +1564,10 @@ def test_ap_wps_pin_request_file(dev, apdev):
         if not success:
             raise Exception("PIN request entry not in the log file")
     finally:
-        subprocess.call(['sudo', 'rm', pinfile])
+        try:
+            os.remove(pinfile)
+        except:
+            pass
 
 def test_ap_wps_auto_setup_with_config_file(dev, apdev):
     """WPS auto-setup with configuration file"""
@@ -1459,10 +1587,9 @@ def test_ap_wps_auto_setup_with_config_file(dev, apdev):
         hostapd.add_bss('phy3', ifname, conffile)
         hapd = hostapd.Hostapd(ifname)
         hapd.request("WPS_PBC")
-        dev[0].request("WPS_PBC")
-        ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=30)
-        if ev is None:
-            raise Exception("Association with the AP timed out")
+        dev[0].scan_for_bss(apdev[0]['bssid'], freq="2412")
+        dev[0].request("WPS_PBC " + apdev[0]['bssid'])
+        dev[0].wait_connected(timeout=30)
         with open(conffile, "r") as f:
             lines = f.read().splitlines()
             vals = dict()
@@ -1478,13 +1605,15 @@ def test_ap_wps_auto_setup_with_config_file(dev, apdev):
         if vals['ieee80211n'] != '1' or vals['wps_state'] != '2' or "WPA-PSK" not in vals['wpa_key_mgmt']:
             raise Exception("Incorrect configuration: " + str(vals))
     finally:
-        subprocess.call(['sudo', 'rm', conffile])
+        try:
+            os.remove(conffile)
+        except:
+            pass
 
 def test_ap_wps_pbc_timeout(dev, apdev, params):
     """wpa_supplicant PBC walk time [long]"""
     if not params['long']:
-        logger.info("Skip test case with long duration due to --long not specified")
-        return "skip"
+        raise HwsimSkip("Skip test case with long duration due to --long not specified")
     ssid = "test-wps"
     hostapd.add_ap(apdev[0]['ifname'],
                    { "ssid": ssid, "eap_server": "1", "wps_state": "1" })
@@ -2102,3 +2231,186 @@ def test_ap_wps_disabled(dev, apdev):
         raise Exception("WPS_PBC succeeded unexpectedly")
     if "FAIL" not in hapd.request("WPS_CANCEL"):
         raise Exception("WPS_CANCEL succeeded unexpectedly")
+
+def test_ap_wps_mixed_cred(dev, apdev):
+    """WPS 2.0 STA merging mixed mode WPA/WPA2 credentials"""
+    ssid = "test-wps-wep"
+    hostapd.add_ap(apdev[0]['ifname'],
+                   { "ssid": ssid, "eap_server": "1", "wps_state": "2",
+                     "skip_cred_build": "1", "extra_cred": "wps-mixed-cred" })
+    hapd = hostapd.Hostapd(apdev[0]['ifname'])
+    hapd.request("WPS_PBC")
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq="2412")
+    dev[0].request("WPS_PBC " + apdev[0]['bssid'])
+    ev = dev[0].wait_event(["WPS-SUCCESS"], timeout=30)
+    if ev is None:
+        raise Exception("WPS-SUCCESS event timed out")
+    nets = dev[0].list_networks()
+    if len(nets) != 1:
+        raise Exception("Unexpected number of network blocks")
+    id = nets[0]['id']
+    proto = dev[0].get_network(id, "proto")
+    if proto != "WPA RSN":
+        raise Exception("Unexpected merged proto field value: " + proto)
+    pairwise = dev[0].get_network(id, "pairwise")
+    if pairwise != "CCMP TKIP" and pairwise != "CCMP GCMP TKIP":
+        raise Exception("Unexpected merged pairwise field value: " + pairwise)
+
+def test_ap_wps_while_connected(dev, apdev):
+    """WPS PBC provisioning while connected to another AP"""
+    ssid = "test-wps-conf"
+    hostapd.add_ap(apdev[0]['ifname'],
+                   { "ssid": ssid, "eap_server": "1", "wps_state": "2",
+                     "wpa_passphrase": "12345678", "wpa": "2",
+                     "wpa_key_mgmt": "WPA-PSK", "rsn_pairwise": "CCMP"})
+    hapd = hostapd.Hostapd(apdev[0]['ifname'])
+
+    hostapd.add_ap(apdev[1]['ifname'], { "ssid": "open" })
+    dev[0].connect("open", key_mgmt="NONE", scan_freq="2412")
+
+    logger.info("WPS provisioning step")
+    hapd.request("WPS_PBC")
+    dev[0].dump_monitor()
+    dev[0].request("WPS_PBC " + apdev[0]['bssid'])
+    dev[0].wait_connected(timeout=30)
+    status = dev[0].get_status()
+    if status['bssid'] != apdev[0]['bssid']:
+        raise Exception("Unexpected BSSID")
+
+def test_ap_wps_while_connected_no_autoconnect(dev, apdev):
+    """WPS PBC provisioning while connected to another AP and STA_AUTOCONNECT disabled"""
+    ssid = "test-wps-conf"
+    hostapd.add_ap(apdev[0]['ifname'],
+                   { "ssid": ssid, "eap_server": "1", "wps_state": "2",
+                     "wpa_passphrase": "12345678", "wpa": "2",
+                     "wpa_key_mgmt": "WPA-PSK", "rsn_pairwise": "CCMP"})
+    hapd = hostapd.Hostapd(apdev[0]['ifname'])
+
+    hostapd.add_ap(apdev[1]['ifname'], { "ssid": "open" })
+
+    try:
+        dev[0].request("STA_AUTOCONNECT 0")
+        dev[0].connect("open", key_mgmt="NONE", scan_freq="2412")
+
+        logger.info("WPS provisioning step")
+        hapd.request("WPS_PBC")
+        dev[0].dump_monitor()
+        dev[0].request("WPS_PBC " + apdev[0]['bssid'])
+        dev[0].wait_connected(timeout=30)
+        status = dev[0].get_status()
+        if status['bssid'] != apdev[0]['bssid']:
+            raise Exception("Unexpected BSSID")
+    finally:
+        dev[0].request("STA_AUTOCONNECT 1")
+
+def test_ap_wps_from_event(dev, apdev):
+    """WPS PBC event on AP to enable PBC"""
+    ssid = "test-wps-conf"
+    hapd = hostapd.add_ap(apdev[0]['ifname'],
+                          { "ssid": ssid, "eap_server": "1", "wps_state": "2",
+                            "wpa_passphrase": "12345678", "wpa": "2",
+                            "wpa_key_mgmt": "WPA-PSK", "rsn_pairwise": "CCMP"})
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq="2412")
+    dev[0].dump_monitor()
+    hapd.dump_monitor()
+    dev[0].request("WPS_PBC " + apdev[0]['bssid'])
+
+    ev = hapd.wait_event(['WPS-ENROLLEE-SEEN'], timeout=15)
+    if ev is None:
+        raise Exception("No WPS-ENROLLEE-SEEN event on AP")
+    vals = ev.split(' ')
+    if vals[1] != dev[0].p2p_interface_addr():
+        raise Exception("Unexpected enrollee address: " + vals[1])
+    if vals[5] != '4':
+        raise Exception("Unexpected Device Password Id: " + vals[5])
+    hapd.request("WPS_PBC")
+    dev[0].wait_connected(timeout=30)
+
+def test_ap_wps_ap_scan_2(dev, apdev):
+    """AP_SCAN 2 for WPS"""
+    ssid = "test-wps-conf"
+    hapd = hostapd.add_ap(apdev[0]['ifname'],
+                          { "ssid": ssid, "eap_server": "1", "wps_state": "2",
+                            "wpa_passphrase": "12345678", "wpa": "2",
+                            "wpa_key_mgmt": "WPA-PSK", "rsn_pairwise": "CCMP"})
+    hapd.request("WPS_PBC")
+
+    wpas = WpaSupplicant(global_iface='/tmp/wpas-wlan5')
+    wpas.interface_add("wlan5", drv_params="force_connect_cmd=1")
+
+    if "OK" not in wpas.request("AP_SCAN 2"):
+        raise Exception("Failed to set AP_SCAN 2")
+
+    wpas.scan_for_bss(apdev[0]['bssid'], freq="2412")
+    wpas.request("WPS_PBC " + apdev[0]['bssid'])
+    ev = wpas.wait_event(["WPS-SUCCESS"], timeout=15)
+    if ev is None:
+        raise Exception("WPS-SUCCESS event timed out")
+    wpas.wait_connected(timeout=30)
+    wpas.request("DISCONNECT")
+    wpas.request("BSS_FLUSH 0")
+    wpas.dump_monitor()
+    wpas.request("REASSOCIATE")
+    wpas.wait_connected(timeout=30)
+
+def test_ap_wps_eapol_workaround(dev, apdev):
+    """EAPOL workaround code path for 802.1X header length mismatch"""
+    ssid = "test-wps"
+    hostapd.add_ap(apdev[0]['ifname'],
+                   { "ssid": ssid, "eap_server": "1", "wps_state": "1" })
+    hapd = hostapd.Hostapd(apdev[0]['ifname'])
+    bssid = apdev[0]['bssid']
+    hapd.request("SET ext_eapol_frame_io 1")
+    dev[0].request("SET ext_eapol_frame_io 1")
+    hapd.request("WPS_PBC")
+    dev[0].request("WPS_PBC")
+
+    ev = hapd.wait_event(["EAPOL-TX"], timeout=15)
+    if ev is None:
+        raise Exception("Timeout on EAPOL-TX from hostapd")
+
+    res = dev[0].request("EAPOL_RX " + bssid + " 020000040193000501FFFF")
+    if "OK" not in res:
+        raise Exception("EAPOL_RX to wpa_supplicant failed")
+
+def test_ap_wps_iteration(dev, apdev):
+    """WPS PIN and iterate through APs without selected registrar"""
+    ssid = "test-wps-conf"
+    hapd = hostapd.add_ap(apdev[0]['ifname'],
+                          { "ssid": ssid, "eap_server": "1", "wps_state": "2",
+                            "wpa_passphrase": "12345678", "wpa": "2",
+                            "wpa_key_mgmt": "WPA-PSK", "rsn_pairwise": "CCMP"})
+
+    ssid2 = "test-wps-conf2"
+    hapd2 = hostapd.add_ap(apdev[1]['ifname'],
+                           { "ssid": ssid2, "eap_server": "1", "wps_state": "2",
+                             "wpa_passphrase": "12345678", "wpa": "2",
+                             "wpa_key_mgmt": "WPA-PSK", "rsn_pairwise": "CCMP"})
+
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq="2412")
+    dev[0].scan_for_bss(apdev[1]['bssid'], freq="2412")
+    dev[0].dump_monitor()
+    pin = dev[0].request("WPS_PIN any")
+
+    # Wait for iteration through all WPS APs to happen before enabling any
+    # Registrar.
+    for i in range(2):
+        ev = dev[0].wait_event(["Associated with"], timeout=30)
+        if ev is None:
+            raise Exception("No association seen")
+        ev = dev[0].wait_event(["WPS-M2D"], timeout=10)
+        if ev is None:
+            raise Exception("No M2D from AP")
+        dev[0].wait_disconnected()
+
+    # Verify that each AP requested PIN
+    ev = hapd.wait_event(["WPS-PIN-NEEDED"], timeout=1)
+    if ev is None:
+        raise Exception("No WPS-PIN-NEEDED event from AP")
+    ev = hapd2.wait_event(["WPS-PIN-NEEDED"], timeout=1)
+    if ev is None:
+        raise Exception("No WPS-PIN-NEEDED event from AP2")
+
+    # Provide PIN to one of the APs and verify that connection gets formed
+    hapd.request("WPS_PIN any " + pin)
+    dev[0].wait_connected(timeout=30)

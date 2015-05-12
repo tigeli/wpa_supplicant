@@ -15,14 +15,15 @@ captured through the hwsim0 monitor interface that capture all frames
 sent on all channels. wlantest is used to store the frames for
 analysis. Three wpa_supplicant processes are used to control three
 virtual radios and one hostapd process is used to dynamically control
-the other two virtual radios. hwsim_test is used to verify that data
-connection (both unicast and broadcast) works between two netdevs.
+the other two virtual radios. wpa_supplicant/hostapd test functionality
+is used to verify that data connection (both unicast and broadcast)
+works between two netdevs.
 
 The python scripts and tools in this directory control test case
 execution. They interact wpa_supplicant and hostapd through control
-interfaces to perform the operations. In addition, wlantest_cli and
-hwsim_test are used to verify that operations have been performed
-correctly and that the network connection works in the expected way.
+interfaces to perform the operations. In addition, wlantest_cli is used
+to verify that operations have been performed correctly and that the
+network connection works in the expected way.
 
 These test cases are run automatically against the hostap.git commits
 for regression testing and to help in keeping the hostap.git master
@@ -48,15 +49,13 @@ make hostapd hlr_auc_gw
 cd ../wlantest
 make clean
 make
-cd ../mac80211_hwsim/tools
-make
 
 Alternatively, the build.sh script here can be used to run these steps
 with conditional creation of .config files only if they do not exist.
 
 The test scripts can find the binaries in the locations where they were
-built. It is also possible to install hwsim_test and wlantest_cli
-somewhat on the path to use pre-built tools.
+built. It is also possible to install wlantest_cli somewhere on the path
+to use pre-built tools.
 
 Please note that some of the configuration parameters used to enable
 more testing coverage may require development packages that may not be
@@ -65,6 +64,9 @@ Debian/Ubuntu packages are likely to be needed:
 - binutils-dev
 - libsqlite3-dev
 - libpcap-dev
+
+example-setup.txt provides more complete step-by-step example on how a
+test setup can be built.
 
 
 wpaspy
@@ -146,6 +148,9 @@ conditions:
 # run normal test cases with Linux tracing
 ./run-all.sh trace
 
+# run normal test cases with multi channel support (see details below)
+./run-all.sh channels=<num of channels>
+
 run-all.sh directs debug logs into the logs subdirectory (or $LOGDIR if
 present in the environment). Log file names include the current UNIX
 timestamp and a postfix to identify the specific log:
@@ -169,6 +174,12 @@ line. "-f <module name>" (pointing to file test_<module name>.py) can be
 used to specify that all test cases from a single file are to be
 run. Test name as the last command line argument can be specified that a
 single test case is to be run (e.g., "./run-tests.py ap_pmf_required").
+
+Notice that some tests require the driver to support concurrent
+operation on multi channels in order to run. These tests will be skipped
+in case the driver does not support multi channels. To enable support
+for multi channel, the number of supported channel is passed as an
+argument to run-all.sh or start.sh
 
 
 Adding/modifying test cases

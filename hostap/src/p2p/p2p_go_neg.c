@@ -9,7 +9,9 @@
 #include "includes.h"
 
 #include "common.h"
+#include "utils/eloop.h"
 #include "common/ieee802_11_defs.h"
+#include "common/wpa_ctrl.h"
 #include "wps/wps_defs.h"
 #include "p2p_i.h"
 #include "p2p.h"
@@ -105,6 +107,8 @@ u16 p2p_wps_method_pw_id(enum p2p_wps_method wps_method)
 		return DEV_PW_PUSHBUTTON;
 	case WPS_NFC:
 		return DEV_PW_NFC_CONNECTION_HANDOVER;
+	case WPS_P2PS:
+		return DEV_PW_P2PS_DEFAULT;
 	default:
 		return DEV_PW_DEFAULT;
 	}
@@ -122,6 +126,8 @@ static const char * p2p_wps_method_str(enum p2p_wps_method wps_method)
 		return "PBC";
 	case WPS_NFC:
 		return "NFC";
+	case WPS_P2PS:
+		return "P2PS";
 	default:
 		return "??";
 	}
@@ -141,6 +147,9 @@ static struct wpabuf * p2p_build_go_neg_req(struct p2p_data *p2p,
 	if (p2p->wfd_ie_go_neg)
 		extra = wpabuf_len(p2p->wfd_ie_go_neg);
 #endif /* CONFIG_WIFI_DISPLAY */
+
+	if (p2p->vendor_elem && p2p->vendor_elem[VENDOR_ELEM_P2P_GO_NEG_REQ])
+		extra += wpabuf_len(p2p->vendor_elem[VENDOR_ELEM_P2P_GO_NEG_REQ]);
 
 	buf = wpabuf_alloc(1000 + extra);
 	if (buf == NULL)
@@ -191,6 +200,9 @@ static struct wpabuf * p2p_build_go_neg_req(struct p2p_data *p2p,
 		wpabuf_put_buf(buf, p2p->wfd_ie_go_neg);
 #endif /* CONFIG_WIFI_DISPLAY */
 
+	if (p2p->vendor_elem && p2p->vendor_elem[VENDOR_ELEM_P2P_GO_NEG_REQ])
+		wpabuf_put_buf(buf, p2p->vendor_elem[VENDOR_ELEM_P2P_GO_NEG_REQ]);
+
 	return buf;
 }
 
@@ -210,10 +222,12 @@ int p2p_connect_send(struct p2p_data *p2p, struct p2p_device *dev)
 			config_method = WPS_CONFIG_DISPLAY;
 		else if (dev->wps_method == WPS_PBC)
 			config_method = WPS_CONFIG_PUSHBUTTON;
+		else if (dev->wps_method == WPS_P2PS)
+			config_method = WPS_CONFIG_P2PS;
 		else
 			return -1;
 		return p2p_prov_disc_req(p2p, dev->info.p2p_device_addr,
-					 config_method, 0, 0, 1);
+					 NULL, config_method, 0, 0, 1);
 	}
 
 	freq = dev->listen_freq > 0 ? dev->listen_freq : dev->oper_freq;
@@ -233,6 +247,7 @@ int p2p_connect_send(struct p2p_data *p2p, struct p2p_device *dev)
 	p2p_set_state(p2p, P2P_CONNECT);
 	p2p->pending_action_state = P2P_PENDING_GO_NEG_REQUEST;
 	p2p->go_neg_peer = dev;
+	eloop_cancel_timeout(p2p_go_neg_wait_timeout, p2p, NULL);
 	dev->flags |= P2P_DEV_WAIT_GO_NEG_RESPONSE;
 	dev->connect_reqs++;
 	if (p2p_send_action(p2p, freq, dev->info.p2p_device_addr,
@@ -267,6 +282,9 @@ static struct wpabuf * p2p_build_go_neg_resp(struct p2p_data *p2p,
 	if (p2p->wfd_ie_go_neg)
 		extra = wpabuf_len(p2p->wfd_ie_go_neg);
 #endif /* CONFIG_WIFI_DISPLAY */
+
+	if (p2p->vendor_elem && p2p->vendor_elem[VENDOR_ELEM_P2P_GO_NEG_RESP])
+		extra += wpabuf_len(p2p->vendor_elem[VENDOR_ELEM_P2P_GO_NEG_RESP]);
 
 	buf = wpabuf_alloc(1000 + extra);
 	if (buf == NULL)
@@ -336,6 +354,8 @@ static struct wpabuf * p2p_build_go_neg_resp(struct p2p_data *p2p,
 		wpabuf_put_buf(buf, p2p->wfd_ie_go_neg);
 #endif /* CONFIG_WIFI_DISPLAY */
 
+	if (p2p->vendor_elem && p2p->vendor_elem[VENDOR_ELEM_P2P_GO_NEG_RESP])
+		wpabuf_put_buf(buf, p2p->vendor_elem[VENDOR_ELEM_P2P_GO_NEG_RESP]);
 
 	return buf;
 }
@@ -474,8 +494,8 @@ void p2p_reselect_channel(struct p2p_data *p2p,
 }
 
 
-static int p2p_go_select_channel(struct p2p_data *p2p, struct p2p_device *dev,
-				 u8 *status)
+int p2p_go_select_channel(struct p2p_data *p2p, struct p2p_device *dev,
+			  u8 *status)
 {
 	struct p2p_channels tmp, intersection;
 
@@ -609,7 +629,7 @@ void p2p_process_go_neg_req(struct p2p_data *p2p, const u8 *sa,
 			 * Request frame.
 			 */
 			p2p->cfg->send_action_done(p2p->cfg->cb_ctx);
-			p2p_go_neg_failed(p2p, dev, *msg.status);
+			p2p_go_neg_failed(p2p, *msg.status);
 			p2p_parse_free(&msg);
 			return;
 		}
@@ -632,6 +652,9 @@ void p2p_process_go_neg_req(struct p2p_data *p2p, const u8 *sa,
 			MAC2STR(dev->info.p2p_device_addr));
 		p2p_add_dev_info(p2p, sa, dev, &msg);
 	}
+
+	if (p2p->go_neg_peer && p2p->go_neg_peer == dev)
+		eloop_cancel_timeout(p2p_go_neg_wait_timeout, p2p, NULL);
 
 	if (dev && dev->flags & P2P_DEV_USER_REJECTED) {
 		p2p_dbg(p2p, "User has rejected this peer");
@@ -726,6 +749,16 @@ void p2p_process_go_neg_req(struct p2p_data *p2p, const u8 *sa,
 				goto fail;
 			}
 			break;
+		case DEV_PW_P2PS_DEFAULT:
+			p2p_dbg(p2p, "Peer using P2PS pin");
+			if (dev->wps_method != WPS_P2PS) {
+				p2p_dbg(p2p,
+					"We have wps_method=%s -> incompatible",
+					p2p_wps_method_str(dev->wps_method));
+				status = P2P_SC_FAIL_INCOMPATIBLE_PROV_METHOD;
+				goto fail;
+			}
+			break;
 		default:
 			if (msg.dev_password_id &&
 			    msg.dev_password_id == dev->oob_pw_id) {
@@ -777,6 +810,7 @@ void p2p_process_go_neg_req(struct p2p_data *p2p, const u8 *sa,
 		dev->dialog_token = msg.dialog_token;
 		os_memcpy(dev->intended_addr, msg.intended_addr, ETH_ALEN);
 		p2p->go_neg_peer = dev;
+		eloop_cancel_timeout(p2p_go_neg_wait_timeout, p2p, NULL);
 		status = P2P_SC_SUCCESS;
 	}
 
@@ -844,6 +878,9 @@ static struct wpabuf * p2p_build_go_neg_conf(struct p2p_data *p2p,
 		extra = wpabuf_len(p2p->wfd_ie_go_neg);
 #endif /* CONFIG_WIFI_DISPLAY */
 
+	if (p2p->vendor_elem && p2p->vendor_elem[VENDOR_ELEM_P2P_GO_NEG_CONF])
+		extra += wpabuf_len(p2p->vendor_elem[VENDOR_ELEM_P2P_GO_NEG_CONF]);
+
 	buf = wpabuf_alloc(1000 + extra);
 	if (buf == NULL)
 		return NULL;
@@ -887,6 +924,9 @@ static struct wpabuf * p2p_build_go_neg_conf(struct p2p_data *p2p,
 	if (p2p->wfd_ie_go_neg)
 		wpabuf_put_buf(buf, p2p->wfd_ie_go_neg);
 #endif /* CONFIG_WIFI_DISPLAY */
+
+	if (p2p->vendor_elem && p2p->vendor_elem[VENDOR_ELEM_P2P_GO_NEG_CONF])
+		wpabuf_put_buf(buf, p2p->vendor_elem[VENDOR_ELEM_P2P_GO_NEG_CONF]);
 
 	return buf;
 }
@@ -939,12 +979,18 @@ void p2p_process_go_neg_resp(struct p2p_data *p2p, const u8 *sa,
 		if (*msg.status == P2P_SC_FAIL_INFO_CURRENTLY_UNAVAILABLE) {
 			p2p_dbg(p2p, "Wait for the peer to become ready for GO Negotiation");
 			dev->flags |= P2P_DEV_NOT_YET_READY;
-			os_get_reltime(&dev->go_neg_wait_started);
-			p2p_set_state(p2p, P2P_WAIT_PEER_IDLE);
+			eloop_cancel_timeout(p2p_go_neg_wait_timeout, p2p,
+					     NULL);
+			eloop_register_timeout(120, 0, p2p_go_neg_wait_timeout,
+					       p2p, NULL);
+			if (p2p->state == P2P_CONNECT_LISTEN)
+				p2p_set_state(p2p, P2P_WAIT_PEER_CONNECT);
+			else
+				p2p_set_state(p2p, P2P_WAIT_PEER_IDLE);
 			p2p_set_timeout(p2p, 0, 0);
 		} else {
 			p2p_dbg(p2p, "Stop GO Negotiation attempt");
-			p2p_go_neg_failed(p2p, dev, *msg.status);
+			p2p_go_neg_failed(p2p, *msg.status);
 		}
 		p2p->cfg->send_action_done(p2p->cfg->cb_ctx);
 		p2p_parse_free(&msg);
@@ -1072,6 +1118,15 @@ void p2p_process_go_neg_resp(struct p2p_data *p2p, const u8 *sa,
 			goto fail;
 		}
 		break;
+	case DEV_PW_P2PS_DEFAULT:
+		p2p_dbg(p2p, "P2P: Peer using P2PS default pin");
+		if (dev->wps_method != WPS_P2PS) {
+			p2p_dbg(p2p, "We have wps_method=%s -> incompatible",
+				p2p_wps_method_str(dev->wps_method));
+			status = P2P_SC_FAIL_INCOMPATIBLE_PROV_METHOD;
+			goto fail;
+		}
+		break;
 	default:
 		if (msg.dev_password_id &&
 		    msg.dev_password_id == dev->oob_pw_id) {
@@ -1126,13 +1181,13 @@ fail:
 			    wpabuf_head(dev->go_neg_conf),
 			    wpabuf_len(dev->go_neg_conf), 200) < 0) {
 		p2p_dbg(p2p, "Failed to send Action frame");
-		p2p_go_neg_failed(p2p, dev, -1);
+		p2p_go_neg_failed(p2p, -1);
 		p2p->cfg->send_action_done(p2p->cfg->cb_ctx);
 	} else
 		dev->go_neg_conf_sent++;
 	if (status != P2P_SC_SUCCESS) {
 		p2p_dbg(p2p, "GO Negotiation failed");
-		p2p_go_neg_failed(p2p, dev, status);
+		p2p_go_neg_failed(p2p, status);
 	}
 }
 
@@ -1183,7 +1238,7 @@ void p2p_process_go_neg_conf(struct p2p_data *p2p, const u8 *sa,
 	}
 	if (*msg.status) {
 		p2p_dbg(p2p, "GO Negotiation rejected: status %d", *msg.status);
-		p2p_go_neg_failed(p2p, dev, *msg.status);
+		p2p_go_neg_failed(p2p, *msg.status);
 		p2p_parse_free(&msg);
 		return;
 	}
@@ -1195,7 +1250,7 @@ void p2p_process_go_neg_conf(struct p2p_data *p2p, const u8 *sa,
 	} else if (dev->go_state == REMOTE_GO) {
 		p2p_dbg(p2p, "Mandatory P2P Group ID attribute missing from GO Negotiation Confirmation");
 		p2p->ssid_len = 0;
-		p2p_go_neg_failed(p2p, dev, P2P_SC_FAIL_INVALID_PARAMS);
+		p2p_go_neg_failed(p2p, P2P_SC_FAIL_INVALID_PARAMS);
 		p2p_parse_free(&msg);
 		return;
 	}

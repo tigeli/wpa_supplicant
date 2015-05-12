@@ -73,6 +73,9 @@ struct eapol_test_data {
 	struct extra_radius_attr *extra_attrs;
 
 	FILE *server_cert_file;
+
+	const char *pcsc_reader;
+	const char *pcsc_pin;
 };
 
 static struct eapol_test_data eapol_test;
@@ -458,7 +461,7 @@ static void eapol_test_eap_param_needed(void *ctx, enum wpa_ctrl_req_type field,
 	len = os_snprintf(buf, buflen,
 			  WPA_CTRL_REQ "%s-%d:%s needed for SSID ",
 			  field_name, ssid->id, txt);
-	if (len < 0 || (size_t) len >= buflen) {
+	if (os_snprintf_error(buflen, len)) {
 		os_free(buf);
 		return;
 	}
@@ -477,6 +480,7 @@ static void eapol_test_eap_param_needed(void *ctx, enum wpa_ctrl_req_type field,
 
 
 static void eapol_test_cert_cb(void *ctx, int depth, const char *subject,
+			       const char *altsubject[], int num_altsubject,
 			       const char *cert_hash,
 			       const struct wpabuf *cert)
 {
@@ -505,6 +509,14 @@ static void eapol_test_cert_cb(void *ctx, int depth, const char *subject,
 		if (e->server_cert_file)
 			eapol_test_write_cert(e->server_cert_file,
 					      subject, cert);
+	}
+
+	if (altsubject) {
+		int i;
+
+		for (i = 0; i < num_altsubject; i++)
+			wpa_msg(e->wpa_s, MSG_INFO, WPA_EVENT_EAP_PEER_ALT
+				"depth=%d %s", depth, altsubject[i]);
 	}
 }
 
@@ -565,6 +577,7 @@ static int test_eapol(struct eapol_test_data *e, struct wpa_supplicant *wpa_s,
 	ctx->opensc_engine_path = wpa_s->conf->opensc_engine_path;
 	ctx->pkcs11_engine_path = wpa_s->conf->pkcs11_engine_path;
 	ctx->pkcs11_module_path = wpa_s->conf->pkcs11_module_path;
+	ctx->openssl_ciphers = wpa_s->conf->openssl_ciphers;
 	ctx->eap_param_needed = eapol_test_eap_param_needed;
 	ctx->cert_cb = eapol_test_cert_cb;
 	ctx->cert_in_cb = 1;
@@ -925,7 +938,11 @@ static void wpa_init_conf(struct eapol_test_data *e,
 		*pos++ = a[3];
 	}
 #else /* CONFIG_NATIVE_WINDOWS or CONFIG_ANSI_C_EXTRA */
-	inet_aton(authsrv, &as->addr.u.v4);
+	if (inet_aton(authsrv, &as->addr.u.v4) < 0) {
+		wpa_printf(MSG_ERROR, "Invalid IP address '%s'",
+			   authsrv);
+		assert(0);
+	}
 #endif /* CONFIG_NATIVE_WINDOWS or CONFIG_ANSI_C_EXTRA */
 	as->addr.af = AF_INET;
 	as->port = port;
@@ -954,7 +971,7 @@ static void wpa_init_conf(struct eapol_test_data *e,
 }
 
 
-static int scard_test(void)
+static int scard_test(struct eapol_test_data *e)
 {
 	struct scard_data *scard;
 	size_t len;
@@ -985,10 +1002,10 @@ static int scard_test(void)
 	unsigned char aka_ik[IK_LEN];
 	unsigned char aka_ck[CK_LEN];
 
-	scard = scard_init(NULL);
+	scard = scard_init(e->pcsc_reader);
 	if (scard == NULL)
 		return -1;
-	if (scard_set_pin(scard, "1234")) {
+	if (scard_set_pin(scard, e->pcsc_pin)) {
 		wpa_printf(MSG_WARNING, "PIN validation failed");
 		scard_deinit(scard);
 		return -1;
@@ -1063,7 +1080,7 @@ failed:
 }
 
 
-static int scard_get_triplets(int argc, char *argv[])
+static int scard_get_triplets(struct eapol_test_data *e, int argc, char *argv[])
 {
 	struct scard_data *scard;
 	size_t len;
@@ -1085,7 +1102,7 @@ static int scard_get_triplets(int argc, char *argv[])
 		wpa_debug_level = 99;
 	}
 
-	scard = scard_init(NULL);
+	scard = scard_init(e->pcsc_reader);
 	if (scard == NULL) {
 		printf("Failed to open smartcard connection\n");
 		return -1;
@@ -1143,7 +1160,8 @@ static void usage(void)
 	       "[-s<AS secret>]\\\n"
 	       "           [-r<count>] [-t<timeout>] [-C<Connect-Info>] \\\n"
 	       "           [-M<client MAC address>] [-o<server cert file] \\\n"
-	       "           [-N<attr spec>] \\\n"
+	       "           [-N<attr spec>] [-R<PC/SC reader>] "
+	       "[-P<PC/SC PIN>] \\\n"
 	       "           [-A<client IP>]\n"
 	       "eapol_test scard\n"
 	       "eapol_test sim <PIN> <num triplets> [debug]\n"
@@ -1208,12 +1226,13 @@ int main(int argc, char *argv[])
 	os_memset(&eapol_test, 0, sizeof(eapol_test));
 	eapol_test.connect_info = "CONNECT 11Mbps 802.11b";
 	os_memcpy(eapol_test.own_addr, "\x02\x00\x00\x00\x00\x01", ETH_ALEN);
+	eapol_test.pcsc_pin = "1234";
 
 	wpa_debug_level = 0;
 	wpa_debug_show_keys = 1;
 
 	for (;;) {
-		c = getopt(argc, argv, "a:A:c:C:eM:nN:o:p:r:s:St:W");
+		c = getopt(argc, argv, "a:A:c:C:eM:nN:o:p:P:r:R:s:St:W");
 		if (c < 0)
 			break;
 		switch (c) {
@@ -1254,8 +1273,14 @@ int main(int argc, char *argv[])
 		case 'p':
 			as_port = atoi(optarg);
 			break;
+		case 'P':
+			eapol_test.pcsc_pin = optarg;
+			break;
 		case 'r':
 			eapol_test.eapol_test_num_reauths = atoi(optarg);
+			break;
+		case 'R':
+			eapol_test.pcsc_reader = optarg;
 			break;
 		case 's':
 			as_secret = optarg;
@@ -1304,11 +1329,11 @@ int main(int argc, char *argv[])
 	}
 
 	if (argc > optind && os_strcmp(argv[optind], "scard") == 0) {
-		return scard_test();
+		return scard_test(&eapol_test);
 	}
 
 	if (argc > optind && os_strcmp(argv[optind], "sim") == 0) {
-		return scard_get_triplets(argc - optind - 1,
+		return scard_get_triplets(&eapol_test, argc - optind - 1,
 					  &argv[optind + 1]);
 	}
 
@@ -1342,6 +1367,11 @@ int main(int argc, char *argv[])
 	if (wpa_s.conf->ssid == NULL) {
 		printf("No networks defined.\n");
 		return -1;
+	}
+
+	if (eapol_test.pcsc_reader) {
+		os_free(wpa_s.conf->pcsc_reader);
+		wpa_s.conf->pcsc_reader = os_strdup(eapol_test.pcsc_reader);
 	}
 
 	wpa_init_conf(&eapol_test, &wpa_s, as_addr, as_port, as_secret,

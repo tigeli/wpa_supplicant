@@ -9,6 +9,7 @@ import struct
 import time
 import logging
 logger = logging.getLogger()
+import subprocess
 
 import hostapd
 from wlantest import Wlantest
@@ -96,6 +97,7 @@ def check_wnm_sleep_mode_enter_exit(hapd, dev, interval=None, tfs_req=None):
     sta = hapd.get_sta(addr)
     if "[WNM_SLEEP_MODE]" in sta['flags']:
         raise Exception("Station unexpectedly in WNM-Sleep Mode")
+
     logger.info("Going to WNM Sleep Mode")
     extra = ""
     if interval is not None:
@@ -104,15 +106,26 @@ def check_wnm_sleep_mode_enter_exit(hapd, dev, interval=None, tfs_req=None):
         extra += " tfs_req=" + tfs_req
     if "OK" not in dev.request("WNM_SLEEP enter" + extra):
         raise Exception("WNM_SLEEP failed")
-    time.sleep(0.5)
-    sta = hapd.get_sta(addr)
-    if "[WNM_SLEEP_MODE]" not in sta['flags']:
+    ok = False
+    for i in range(20):
+        time.sleep(0.1)
+        sta = hapd.get_sta(addr)
+        if "[WNM_SLEEP_MODE]" in sta['flags']:
+            ok = True
+            break
+    if not ok:
         raise Exception("Station failed to enter WNM-Sleep Mode")
+
     logger.info("Waking up from WNM Sleep Mode")
+    ok = False
     dev.request("WNM_SLEEP exit")
-    time.sleep(0.5)
-    sta = hapd.get_sta(addr)
-    if "[WNM_SLEEP_MODE]" in sta['flags']:
+    for i in range(20):
+        time.sleep(0.1)
+        sta = hapd.get_sta(addr)
+        if "[WNM_SLEEP_MODE]" not in sta['flags']:
+            ok = True
+            break
+    if not ok:
         raise Exception("Station failed to exit WNM-Sleep Mode")
 
 def test_wnm_sleep_mode_open(dev, apdev):
@@ -126,9 +139,19 @@ def test_wnm_sleep_mode_open(dev, apdev):
     hapd = hostapd.Hostapd(apdev[0]['ifname'])
 
     dev[0].connect("test-wnm", key_mgmt="NONE", scan_freq="2412")
+    ev = hapd.wait_event([ "AP-STA-CONNECTED" ], timeout=5)
+    if ev is None:
+        raise Exception("No connection event received from hostapd")
     check_wnm_sleep_mode_enter_exit(hapd, dev[0])
     check_wnm_sleep_mode_enter_exit(hapd, dev[0], interval=100)
     check_wnm_sleep_mode_enter_exit(hapd, dev[0], tfs_req="5b17010001130e110000071122334455661122334455661234")
+
+    cmds = [ "foo",
+             "exit tfs_req=123 interval=10",
+             "enter tfs_req=qq interval=10" ]
+    for cmd in cmds:
+        if "FAIL" not in dev[0].request("WNM_SLEEP " + cmd):
+            raise Exception("Invalid WNM_SLEEP accepted")
 
 def test_wnm_sleep_mode_rsn(dev, apdev):
     """WNM Sleep Mode - RSN"""
@@ -141,6 +164,9 @@ def test_wnm_sleep_mode_rsn(dev, apdev):
     hapd = hostapd.Hostapd(apdev[0]['ifname'])
 
     dev[0].connect("test-wnm-rsn", psk="12345678", scan_freq="2412")
+    ev = hapd.wait_event([ "AP-STA-CONNECTED" ], timeout=5)
+    if ev is None:
+        raise Exception("No connection event received from hostapd")
     check_wnm_sleep_mode_enter_exit(hapd, dev[0])
 
 def test_wnm_sleep_mode_rsn_pmf(dev, apdev):
@@ -160,6 +186,9 @@ def test_wnm_sleep_mode_rsn_pmf(dev, apdev):
 
     dev[0].connect("test-wnm-rsn", psk="12345678", ieee80211w="2",
                    key_mgmt="WPA-PSK-SHA256", proto="WPA2", scan_freq="2412")
+    ev = hapd.wait_event([ "AP-STA-CONNECTED" ], timeout=5)
+    if ev is None:
+        raise Exception("No connection event received from hostapd")
     check_wnm_sleep_mode_enter_exit(hapd, dev[0])
 
 MGMT_SUBTYPE_ACTION = 13
@@ -211,7 +240,7 @@ def rx_bss_tm_resp(hapd, expect_dialog=None, expect_status=None):
         raise Exception("Unexpected status code %d" % status)
     return resp
 
-def except_ack(hapd):
+def expect_ack(hapd):
     ev = hapd.wait_event(["MGMT-TX-STATUS"], timeout=5)
     if ev is None:
         raise Exception("Missing TX status")
@@ -234,7 +263,7 @@ def test_wnm_bss_tm_req(dev, apdev):
                                  ACTION_CATEG_WNM, WNM_ACT_BSS_TM_REQ,
                                  1, 0, 0)
     hapd.mgmt_tx(req)
-    except_ack(hapd)
+    expect_ack(hapd)
 
     # no disassociation and no candidate list
     req = bss_tm_req(dev[0].p2p_interface_addr(), apdev[0]['bssid'],
@@ -246,7 +275,7 @@ def test_wnm_bss_tm_req(dev, apdev):
     req = bss_tm_req(dev[0].p2p_interface_addr(), apdev[0]['bssid'],
                      req_mode=0x08)
     hapd.mgmt_tx(req)
-    except_ack(hapd)
+    expect_ack(hapd)
 
     # BSS Termination Duration with TSF=0 and Duration=10
     req = bss_tm_req(dev[0].p2p_interface_addr(), apdev[0]['bssid'],
@@ -259,12 +288,12 @@ def test_wnm_bss_tm_req(dev, apdev):
     req = bss_tm_req(dev[0].p2p_interface_addr(), apdev[0]['bssid'],
                      req_mode=0x10)
     hapd.mgmt_tx(req)
-    except_ack(hapd)
+    expect_ack(hapd)
     req = bss_tm_req(dev[0].p2p_interface_addr(), apdev[0]['bssid'],
                      req_mode=0x10)
     req['payload'] += struct.pack("<BBB", 3, 65, 66)
     hapd.mgmt_tx(req)
-    except_ack(hapd)
+    expect_ack(hapd)
 
     # Session Information URL
     req = bss_tm_req(dev[0].p2p_interface_addr(), apdev[0]['bssid'],
@@ -277,21 +306,21 @@ def test_wnm_bss_tm_req(dev, apdev):
     req = bss_tm_req(dev[0].p2p_interface_addr(), apdev[0]['bssid'],
                      req_mode=0x01, dialog_token=5)
     hapd.mgmt_tx(req)
-    resp = rx_bss_tm_resp(hapd, expect_dialog=5, expect_status=1)
+    resp = rx_bss_tm_resp(hapd, expect_dialog=5, expect_status=7)
 
     # Preferred Candidate List with a truncated entry
     req = bss_tm_req(dev[0].p2p_interface_addr(), apdev[0]['bssid'],
                      req_mode=0x01)
     req['payload'] += struct.pack("<BB", 52, 1)
     hapd.mgmt_tx(req)
-    except_ack(hapd)
+    expect_ack(hapd)
 
     # Preferred Candidate List with a too short entry
     req = bss_tm_req(dev[0].p2p_interface_addr(), apdev[0]['bssid'],
                      req_mode=0x01, dialog_token=6)
     req['payload'] += struct.pack("<BB", 52, 0)
     hapd.mgmt_tx(req)
-    resp = rx_bss_tm_resp(hapd, expect_dialog=6, expect_status=1)
+    resp = rx_bss_tm_resp(hapd, expect_dialog=6, expect_status=7)
 
     # Preferred Candidate List with a non-matching entry
     req = bss_tm_req(dev[0].p2p_interface_addr(), apdev[0]['bssid'],
@@ -300,7 +329,7 @@ def test_wnm_bss_tm_req(dev, apdev):
                                   1, 2, 3, 4, 5, 6,
                                   0, 81, 1, 7)
     hapd.mgmt_tx(req)
-    resp = rx_bss_tm_resp(hapd, expect_dialog=6, expect_status=1)
+    resp = rx_bss_tm_resp(hapd, expect_dialog=6, expect_status=7)
 
     # Preferred Candidate List with a truncated subelement
     req = bss_tm_req(dev[0].p2p_interface_addr(), apdev[0]['bssid'],
@@ -310,7 +339,7 @@ def test_wnm_bss_tm_req(dev, apdev):
                                   0, 81, 1, 7,
                                   1, 1)
     hapd.mgmt_tx(req)
-    resp = rx_bss_tm_resp(hapd, expect_dialog=7, expect_status=1)
+    resp = rx_bss_tm_resp(hapd, expect_dialog=7, expect_status=7)
 
     # Preferred Candidate List with lots of invalid optional subelements
     req = bss_tm_req(dev[0].p2p_interface_addr(), apdev[0]['bssid'],
@@ -327,7 +356,7 @@ def test_wnm_bss_tm_req(dev, apdev):
                                   1, 2, 3, 4, 5, 6,
                                   0, 81, 1, 7) + subelems
     hapd.mgmt_tx(req)
-    resp = rx_bss_tm_resp(hapd, expect_dialog=8, expect_status=1)
+    resp = rx_bss_tm_resp(hapd, expect_dialog=8, expect_status=7)
 
     # Preferred Candidate List with lots of valid optional subelements (twice)
     req = bss_tm_req(dev[0].p2p_interface_addr(), apdev[0]['bssid'],
@@ -352,13 +381,141 @@ def test_wnm_bss_tm_req(dev, apdev):
                                   1, 2, 3, 4, 5, 6,
                                   0, 81, 1, 7) + subelems + subelems
     hapd.mgmt_tx(req)
-    resp = rx_bss_tm_resp(hapd, expect_dialog=8, expect_status=1)
+    resp = rx_bss_tm_resp(hapd, expect_dialog=8, expect_status=7)
 
 def test_wnm_bss_keep_alive(dev, apdev):
     """WNM keep-alive"""
     params = { "ssid": "test-wnm",
                "ap_max_inactivity": "1" }
-    hostapd.add_ap(apdev[0]['ifname'], params)
+    hapd = hostapd.add_ap(apdev[0]['ifname'], params)
 
+    addr = dev[0].p2p_interface_addr()
     dev[0].connect("test-wnm", key_mgmt="NONE", scan_freq="2412")
-    time.sleep(2)
+    start = hapd.get_sta(addr)
+    ev = dev[0].wait_event(["CTRL-EVENT-DISCONNECTED"], timeout=2)
+    if ev is not None:
+        raise Exception("Unexpected disconnection")
+    end = hapd.get_sta(addr)
+    if int(end['rx_packets']) <= int(start['rx_packets']):
+        raise Exception("No keep-alive packets received")
+    try:
+        # Disable client keep-alive so that hostapd will verify connection
+        # with client poll
+        dev[0].request("SET no_keep_alive 1")
+        for i in range(60):
+            sta = hapd.get_sta(addr)
+            logger.info("timeout_next=%s rx_packets=%s tx_packets=%s" % (sta['timeout_next'], sta['rx_packets'], sta['tx_packets']))
+            if i > 1 and sta['timeout_next'] != "NULLFUNC POLL" and int(sta['tx_packets']) > int(end['tx_packets']):
+                break
+            ev = dev[0].wait_event(["CTRL-EVENT-DISCONNECTED"], timeout=0.5)
+            if ev is not None:
+                raise Exception("Unexpected disconnection (client poll expected)")
+    finally:
+        dev[0].request("SET no_keep_alive 0")
+    if int(sta['tx_packets']) <= int(end['tx_packets']):
+        raise Exception("No client poll packet seen")
+
+def test_wnm_bss_tm(dev, apdev):
+    """WNM BSS Transition Management"""
+    try:
+        hapd = None
+        hapd2 = None
+        params = { "ssid": "test-wnm",
+                   "country_code": "FI",
+                   "ieee80211d": "1",
+                   "hw_mode": "g",
+                   "channel": "1",
+                   "bss_transition": "1" }
+        hapd = hostapd.add_ap(apdev[0]['ifname'], params)
+
+        id = dev[0].connect("test-wnm", key_mgmt="NONE", scan_freq="2412")
+        dev[0].set_network(id, "scan_freq", "")
+
+        params = { "ssid": "test-wnm",
+                   "country_code": "FI",
+                   "ieee80211d": "1",
+                   "hw_mode": "a",
+                   "channel": "36",
+                   "bss_transition": "1" }
+        hapd2 = hostapd.add_ap(apdev[1]['ifname'], params)
+
+        addr = dev[0].p2p_interface_addr()
+        dev[0].dump_monitor()
+
+        logger.info("No neighbor list entries")
+        if "OK" not in hapd.request("BSS_TM_REQ " + addr):
+            raise Exception("BSS_TM_REQ command failed")
+        ev = hapd.wait_event(['BSS-TM-RESP'], timeout=10)
+        if ev is None:
+            raise Exception("No BSS Transition Management Response")
+        if addr not in ev:
+            raise Exception("Unexpected BSS Transition Management Response address")
+        if "status_code=0" in ev:
+            raise Exception("BSS transition accepted unexpectedly")
+        dev[0].dump_monitor()
+
+        logger.info("Neighbor list entry, but not claimed as Preferred Candidate List")
+        if "OK" not in hapd.request("BSS_TM_REQ " + addr + " neighbor=11:22:33:44:55:66,0x0000,81,3,7"):
+            raise Exception("BSS_TM_REQ command failed")
+        ev = hapd.wait_event(['BSS-TM-RESP'], timeout=10)
+        if ev is None:
+            raise Exception("No BSS Transition Management Response")
+        if "status_code=0" in ev:
+            raise Exception("BSS transition accepted unexpectedly")
+        dev[0].dump_monitor()
+
+        logger.info("Preferred Candidate List (no matching neighbor) without Disassociation Imminent")
+        if "OK" not in hapd.request("BSS_TM_REQ " + addr + " pref=1 neighbor=11:22:33:44:55:66,0x0000,81,3,7,0301ff neighbor=22:33:44:55:66:77,0x0000,1,36,7 neighbor=00:11:22:33:44:55,0x0000,81,4,7,03010a"):
+            raise Exception("BSS_TM_REQ command failed")
+        ev = hapd.wait_event(['BSS-TM-RESP'], timeout=10)
+        if ev is None:
+            raise Exception("No BSS Transition Management Response")
+        if "status_code=0" in ev:
+            raise Exception("BSS transition accepted unexpectedly")
+        ev = dev[0].wait_event(["CTRL-EVENT-SCAN-STARTED"], timeout=5)
+        if ev is None:
+            raise Exception("No scan started")
+        dev[0].dump_monitor()
+
+        logger.info("Preferred Candidate List (matching neighbor for another BSS) without Disassociation Imminent")
+        if "OK" not in hapd.request("BSS_TM_REQ " + addr + " pref=1 abridged=1 valid_int=255 neighbor=" + apdev[1]['bssid'] + ",0x0000,115,36,7,0301ff"):
+            raise Exception("BSS_TM_REQ command failed")
+        ev = hapd.wait_event(['BSS-TM-RESP'], timeout=10)
+        if ev is None:
+            raise Exception("No BSS Transition Management Response")
+        if "status_code=0" not in ev:
+            raise Exception("BSS transition request was not accepted: " + ev)
+        if "target_bssid=" + apdev[1]['bssid'] not in ev:
+            raise Exception("Unexpected target BSS: " + ev)
+        dev[0].wait_connected(timeout=15, error="No reassociation seen")
+        if apdev[1]['bssid'] not in ev:
+            raise Exception("Unexpected reassociation target: " + ev)
+        ev = dev[0].wait_event(["CTRL-EVENT-SCAN-STARTED"], timeout=0.1)
+        if ev is not None:
+            raise Exception("Unexpected scan started")
+        dev[0].dump_monitor()
+
+        logger.info("Preferred Candidate List with two matches, no roam needed")
+        if "OK" not in hapd2.request("BSS_TM_REQ " + addr + " pref=1 abridged=1 valid_int=255 neighbor=" + apdev[0]['bssid'] + ",0x0000,81,1,7,030101 neighbor=" + apdev[1]['bssid'] + ",0x0000,115,36,7,0301ff"):
+            raise Exception("BSS_TM_REQ command failed")
+        ev = hapd2.wait_event(['BSS-TM-RESP'], timeout=10)
+        if ev is None:
+            raise Exception("No BSS Transition Management Response")
+        if "status_code=0" not in ev:
+            raise Exception("BSS transition request was not accepted: " + ev)
+        if "target_bssid=" + apdev[1]['bssid'] not in ev:
+            raise Exception("Unexpected target BSS: " + ev)
+        ev = dev[0].wait_event(["CTRL-EVENT-SCAN-STARTED"], timeout=0.1)
+        if ev is not None:
+            raise Exception("Unexpected scan started")
+        ev = dev[0].wait_event(["CTRL-EVENT-CONNECTED"], timeout=0.5)
+        if ev is not None:
+            raise Exception("Unexpected reassociation");
+    finally:
+        dev[0].request("DISCONNECT")
+        if hapd:
+            hapd.request("DISABLE")
+        if hapd2:
+            hapd2.request("DISABLE")
+        subprocess.call(['iw', 'reg', 'set', '00'])
+        dev[0].flush_scan_cache()

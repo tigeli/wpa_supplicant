@@ -58,7 +58,7 @@ gas_dialog_create(struct hostapd_data *hapd, const u8 *addr, u8 dialog_token)
 	}
 
 	if (sta->gas_dialog == NULL) {
-		sta->gas_dialog = os_zalloc(GAS_DIALOG_MAX *
+		sta->gas_dialog = os_calloc(GAS_DIALOG_MAX,
 					    sizeof(struct gas_dialog_info));
 		if (sta->gas_dialog == NULL)
 			return NULL;
@@ -414,7 +414,7 @@ static void anqp_add_nai_realm(struct hostapd_data *hapd, struct wpabuf *buf,
 			gas_anqp_set_element_len(buf, realm_data_len);
 		}
 		gas_anqp_set_element_len(buf, len);
-	} else if (nai_home_realm && hapd->conf->nai_realm_data) {
+	} else if (nai_home_realm && hapd->conf->nai_realm_data && home_realm) {
 		hs20_add_nai_home_realm_matches(hapd, buf, home_realm,
 						home_realm_len);
 	}
@@ -686,7 +686,6 @@ static void anqp_add_icon_binary_file(struct hostapd_data *hapd,
 static struct wpabuf *
 gas_serv_build_gas_resp_payload(struct hostapd_data *hapd,
 				unsigned int request,
-				struct gas_dialog_info *di,
 				const u8 *home_realm, size_t home_realm_len,
 				const u8 *icon_name, size_t icon_name_len)
 {
@@ -749,6 +748,7 @@ struct anqp_query_info {
 	size_t home_realm_query_len;
 	const u8 *icon_name;
 	size_t icon_name_len;
+	int p2p_sd;
 };
 
 
@@ -920,6 +920,21 @@ static void rx_anqp_vendor_specific(struct hostapd_data *hapd,
 		return;
 	}
 
+#ifdef CONFIG_P2P
+	if (*pos == P2P_OUI_TYPE) {
+		/*
+		 * This is for P2P SD and will be taken care of by the P2P
+		 * implementation. This query needs to be ignored in the generic
+		 * GAS server to avoid duplicated response.
+		 */
+		wpa_printf(MSG_DEBUG,
+			   "ANQP: Ignore WFA vendor type %u (P2P SD) in generic GAS server",
+			   *pos);
+		qi->p2p_sd = 1;
+		return;
+	}
+#endif /* CONFIG_P2P */
+
 	if (*pos != HS20_ANQP_OUI_TYPE) {
 		wpa_printf(MSG_DEBUG, "ANQP: Unsupported WFA vendor type %u",
 			   *pos);
@@ -962,7 +977,7 @@ static void gas_serv_req_local_processing(struct hostapd_data *hapd,
 {
 	struct wpabuf *buf, *tx_buf;
 
-	buf = gas_serv_build_gas_resp_payload(hapd, qi->request, NULL,
+	buf = gas_serv_build_gas_resp_payload(hapd, qi->request,
 					      qi->home_realm_query,
 					      qi->home_realm_query_len,
 					      qi->icon_name, qi->icon_name_len);
@@ -970,6 +985,14 @@ static void gas_serv_req_local_processing(struct hostapd_data *hapd,
 			buf);
 	if (!buf)
 		return;
+#ifdef CONFIG_P2P
+	if (wpabuf_len(buf) == 0 && qi->p2p_sd) {
+		wpa_printf(MSG_DEBUG,
+			   "ANQP: Do not send response to P2P SD from generic GAS service (P2P SD implementation will process this)");
+		wpabuf_free(buf);
+		return;
+	}
+#endif /* CONFIG_P2P */
 
 	if (wpabuf_len(buf) > hapd->gas_frag_limit ||
 	    hapd->conf->gas_comeback_delay) {
@@ -1214,13 +1237,11 @@ static void gas_serv_rx_public_action(void *ctx, const u8 *buf, size_t len,
 {
 	struct hostapd_data *hapd = ctx;
 	const struct ieee80211_mgmt *mgmt;
-	size_t hdr_len;
 	const u8 *sa, *data;
 	int prot;
 
 	mgmt = (const struct ieee80211_mgmt *) buf;
-	hdr_len = (const u8 *) &mgmt->u.action.u.vs_public_action.action - buf;
-	if (hdr_len > len)
+	if (len < IEEE80211_HDRLEN + 2)
 		return;
 	if (mgmt->u.action.category != WLAN_ACTION_PUBLIC &&
 	    mgmt->u.action.category != WLAN_ACTION_PROTECTED_DUAL)
@@ -1232,8 +1253,8 @@ static void gas_serv_rx_public_action(void *ctx, const u8 *buf, size_t len,
 	 */
 	prot = mgmt->u.action.category == WLAN_ACTION_PROTECTED_DUAL;
 	sa = mgmt->sa;
-	len -= hdr_len;
-	data = &mgmt->u.action.u.public_action.action;
+	len -= IEEE80211_HDRLEN + 1;
+	data = buf + IEEE80211_HDRLEN + 1;
 	switch (data[0]) {
 	case WLAN_PA_GAS_INITIAL_REQ:
 		gas_serv_rx_gas_initial_req(hapd, sa, data + 1, len - 1, prot);

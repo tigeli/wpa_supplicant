@@ -1,6 +1,6 @@
 /*
  * Received Management frame processing
- * Copyright (c) 2010, Jouni Malinen <j@w1.fi>
+ * Copyright (c) 2010-2015, Jouni Malinen <j@w1.fi>
  *
  * This software may be distributed under the terms of the BSD license.
  * See README for more details.
@@ -9,6 +9,7 @@
 #include "utils/includes.h"
 
 #include "utils/common.h"
+#include "common/defs.h"
 #include "common/ieee802_11_defs.h"
 #include "common/ieee802_11_common.h"
 #include "crypto/aes_wrap.h"
@@ -753,12 +754,22 @@ static void rx_mgmt_action(struct wlantest *wt, const u8 *data, size_t len,
 }
 
 
-static int check_mmie_mic(const u8 *igtk, const u8 *data, size_t len)
+static int check_mmie_mic(unsigned int mgmt_group_cipher,
+			  const u8 *igtk, size_t igtk_len,
+			  const u8 *data, size_t len)
 {
 	u8 *buf;
 	u8 mic[16];
 	u16 fc;
 	const struct ieee80211_hdr *hdr;
+	int ret, mic_len;
+
+	if (!mgmt_group_cipher || igtk_len < 16)
+		return -1;
+	mic_len = mgmt_group_cipher == WPA_CIPHER_AES_128_CMAC ? 8 : 16;
+
+	if (len < 24 || len - 24 < mic_len)
+		return -1;
 
 	buf = os_malloc(len + 20 - 24);
 	if (buf == NULL)
@@ -772,19 +783,45 @@ static int check_mmie_mic(const u8 *igtk, const u8 *data, size_t len)
 	os_memcpy(buf + 2, hdr->addr1, 3 * ETH_ALEN);
 
 	/* Frame body with MMIE MIC masked to zero */
-	os_memcpy(buf + 20, data + 24, len - 24 - 8);
-	os_memset(buf + 20 + len - 24 - 8, 0, 8);
+	os_memcpy(buf + 20, data + 24, len - 24 - mic_len);
+	os_memset(buf + 20 + len - 24 - mic_len, 0, mic_len);
 
 	wpa_hexdump(MSG_MSGDUMP, "BIP: AAD|Body(masked)", buf, len + 20 - 24);
 	/* MIC = L(AES-128-CMAC(AAD || Frame Body(masked)), 0, 64) */
-	if (omac1_aes_128(igtk, buf, len + 20 - 24, mic) < 0) {
+	if (mgmt_group_cipher == WPA_CIPHER_AES_128_CMAC) {
+		ret = omac1_aes_128(igtk, buf, len + 20 - 24, mic);
+	} else if (mgmt_group_cipher == WPA_CIPHER_BIP_CMAC_256) {
+		ret = omac1_aes_256(igtk, buf, len + 20 - 24, mic);
+	} else if (mgmt_group_cipher == WPA_CIPHER_BIP_GMAC_128 ||
+		 mgmt_group_cipher == WPA_CIPHER_BIP_GMAC_256) {
+		u8 nonce[12], *npos;
+		const u8 *ipn;
+
+		ipn = data + len - mic_len - 6;
+
+		/* Nonce: A2 | IPN */
+		os_memcpy(nonce, hdr->addr2, ETH_ALEN);
+		npos = nonce + ETH_ALEN;
+		*npos++ = ipn[5];
+		*npos++ = ipn[4];
+		*npos++ = ipn[3];
+		*npos++ = ipn[2];
+		*npos++ = ipn[1];
+		*npos++ = ipn[0];
+
+		ret = aes_gmac(igtk, igtk_len, nonce, sizeof(nonce),
+			       buf, len + 20 - 24, mic);
+	} else {
+		ret = -1;
+	}
+	if (ret < 0) {
 		os_free(buf);
 		return -1;
 	}
 
 	os_free(buf);
 
-	if (os_memcmp(data + len - 8, mic, 8) != 0)
+	if (os_memcmp(data + len - mic_len, mic, mic_len) != 0)
 		return -1;
 
 	return 0;
@@ -798,6 +835,7 @@ static int check_bip(struct wlantest *wt, const u8 *data, size_t len)
 	const u8 *mmie;
 	u16 keyid;
 	struct wlantest_bss *bss;
+	size_t mic_len;
 
 	mgmt = (const struct ieee80211_mgmt *) data;
 	fc = le_to_host16(mgmt->frame_control);
@@ -814,8 +852,11 @@ static int check_bip(struct wlantest *wt, const u8 *data, size_t len)
 	if (bss == NULL)
 		return 0; /* No key known yet */
 
-	if (len < 24 + 18 || data[len - 18] != WLAN_EID_MMIE ||
-	    data[len - 17] != 16) {
+	mic_len = bss->mgmt_group_cipher == WPA_CIPHER_AES_128_CMAC ? 8 : 16;
+
+	if (len < 24 + 10 + mic_len ||
+	    data[len - (10 + mic_len)] != WLAN_EID_MMIE ||
+	    data[len - (10 + mic_len - 1)] != 8 + mic_len) {
 		/* No MMIE */
 		if (bss->rsn_capab & WPA_CAPABILITY_MFPC) {
 			add_note(wt, MSG_INFO, "Robust group-addressed "
@@ -827,7 +868,7 @@ static int check_bip(struct wlantest *wt, const u8 *data, size_t len)
 		return 0;
 	}
 
-	mmie = data + len - 16;
+	mmie = data + len - (8 + mic_len);
 	keyid = WPA_GET_LE16(mmie);
 	if (keyid & 0xf000) {
 		add_note(wt, MSG_INFO, "MMIE KeyID reserved bits not zero "
@@ -842,9 +883,9 @@ static int check_bip(struct wlantest *wt, const u8 *data, size_t len)
 	}
 	wpa_printf(MSG_DEBUG, "MMIE KeyID %u", keyid);
 	wpa_hexdump(MSG_MSGDUMP, "MMIE IPN", mmie + 2, 6);
-	wpa_hexdump(MSG_MSGDUMP, "MMIE MIC", mmie + 8, 8);
+	wpa_hexdump(MSG_MSGDUMP, "MMIE MIC", mmie + 8, mic_len);
 
-	if (!bss->igtk_set[keyid]) {
+	if (!bss->igtk_len[keyid]) {
 		add_note(wt, MSG_DEBUG, "No IGTK known to validate BIP frame");
 		return 0;
 	}
@@ -856,7 +897,8 @@ static int check_bip(struct wlantest *wt, const u8 *data, size_t len)
 		wpa_hexdump(MSG_INFO, "Last RX IPN", bss->ipn[keyid], 6);
 	}
 
-	if (check_mmie_mic(bss->igtk[keyid], data, len) < 0) {
+	if (check_mmie_mic(bss->mgmt_group_cipher, bss->igtk[keyid],
+			   bss->igtk_len[keyid], data, len) < 0) {
 		add_note(wt, MSG_INFO, "Invalid MMIE MIC in a frame from "
 			 MACSTR, MAC2STR(mgmt->sa));
 		bss->counters[WLANTEST_BSS_COUNTER_INVALID_BIP_MMIE]++;
@@ -930,16 +972,18 @@ static u8 * mgmt_ccmp_decrypt(struct wlantest *wt, const u8 *data, size_t len,
 	if (os_memcmp(pn, rsc, 6) <= 0) {
 		u16 seq_ctrl = le_to_host16(hdr->seq_ctrl);
 		add_note(wt, MSG_INFO, "CCMP/TKIP replay detected: A1=" MACSTR
-			 " A2=" MACSTR " A3=" MACSTR " seq=%u frag=%u",
+			 " A2=" MACSTR " A3=" MACSTR " seq=%u frag=%u%s",
 			 MAC2STR(hdr->addr1), MAC2STR(hdr->addr2),
 			 MAC2STR(hdr->addr3),
 			 WLAN_GET_SEQ_SEQ(seq_ctrl),
-			 WLAN_GET_SEQ_FRAG(seq_ctrl));
+			 WLAN_GET_SEQ_FRAG(seq_ctrl),
+			 (le_to_host16(hdr->frame_control) & WLAN_FC_RETRY) ?
+			 " Retry" : "");
 		wpa_hexdump(MSG_INFO, "RX PN", pn, 6);
 		wpa_hexdump(MSG_INFO, "RSC", rsc, 6);
 	}
 
-	decrypted = ccmp_decrypt(sta->ptk.tk1, hdr, data + 24, len - 24, dlen);
+	decrypted = ccmp_decrypt(sta->ptk.tk, hdr, data + 24, len - 24, dlen);
 	if (decrypted) {
 		os_memcpy(rsc, pn, 6);
 		frame = os_malloc(24 + *dlen);

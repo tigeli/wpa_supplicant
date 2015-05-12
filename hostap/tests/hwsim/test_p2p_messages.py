@@ -735,8 +735,7 @@ def test_p2p_msg_invitation_req_to_go(dev, apdev):
         raise Exception("Unexpected number of networks")
     if "[P2P-PERSISTENT]" not in networks[0]['flags']:
         raise Exception("Not the persistent group data")
-    if "OK" not in dev[0].global_request("P2P_GROUP_ADD persistent=" + networks[0]['id'] + " freq=" + listen_freq):
-        raise Exception("Could not state GO")
+    dev[0].p2p_start_go(persistent=networks[0]['id'], freq=listen_freq)
 
     dialog_token = 0
 
@@ -752,7 +751,7 @@ def test_p2p_msg_invitation_req_to_go(dev, apdev):
     attrs += p2p_attr_device_info(addr1, config_methods=0x0108)
     msg['payload'] += ie_p2p(attrs)
 
-    mgmt_tx(dev[1], "MGMT_TX {} {} freq={} wait_time=50 no_cck=1 action={}".format(addr0, addr0, peer['listen_freq'], binascii.hexlify(msg['payload'])))
+    mgmt_tx(dev[1], "MGMT_TX {} {} freq={} wait_time=200 no_cck=1 action={}".format(addr0, addr0, peer['listen_freq'], binascii.hexlify(msg['payload'])))
 
     rx_msg = dev[1].mgmt_rx()
     if rx_msg is None:
@@ -778,7 +777,7 @@ def test_p2p_msg_invitation_req_to_go(dev, apdev):
     attrs += p2p_attr_device_info(addr1, config_methods=0x0108)
     msg['payload'] += ie_p2p(attrs)
 
-    mgmt_tx(dev[1], "MGMT_TX {} {} freq={} wait_time=50 no_cck=1 action={}".format(addr0, addr0, peer['listen_freq'], binascii.hexlify(msg['payload'])))
+    mgmt_tx(dev[1], "MGMT_TX {} {} freq={} wait_time=200 no_cck=1 action={}".format(addr0, addr0, peer['listen_freq'], binascii.hexlify(msg['payload'])))
 
     rx_msg = dev[1].mgmt_rx()
     if rx_msg is None:
@@ -857,8 +856,8 @@ def test_p2p_msg_invitation_resp(dev, apdev):
     msg = p2p_hdr(dst, src, type=P2P_INVITATION_RESP, dialog_token=2)
     attrs = p2p_attr_status()
     msg['payload'] += ie_p2p(attrs)
-    mgmt_tx(dev[1], "MGMT_TX {} {} freq={} wait_time=50 no_cck=1 action={}".format(addr0, addr0, peer['listen_freq'], binascii.hexlify(msg['payload'])))
-    time.sleep(0.1)
+    mgmt_tx(dev[1], "MGMT_TX {} {} freq={} wait_time=200 no_cck=1 action={}".format(addr0, addr0, peer['listen_freq'], binascii.hexlify(msg['payload'])))
+    time.sleep(0.25)
 
     if "FAIL" in dev[1].request("SET ext_mgmt_frame_handling 1"):
         raise Exception("Failed to enable external management frame handling")
@@ -877,7 +876,7 @@ def test_p2p_msg_invitation_resp(dev, apdev):
     msg = p2p_hdr(dst, src, type=P2P_INVITATION_RESP, dialog_token=p2p['dialog_token'])
     attrs = struct.pack("<BB", P2P_ATTR_CAPABILITY, 0)
     msg['payload'] += ie_p2p(attrs)
-    mgmt_tx(dev[1], "MGMT_TX {} {} freq={} wait_time=50 no_cck=1 action={}".format(addr0, addr0, rx_msg['freq'], binascii.hexlify(msg['payload'])))
+    mgmt_tx(dev[1], "MGMT_TX {} {} freq={} wait_time=200 no_cck=1 action={}".format(addr0, addr0, rx_msg['freq'], binascii.hexlify(msg['payload'])))
 
     invite(dev[0], dev[1])
     rx_msg = dev[1].mgmt_rx()
@@ -893,7 +892,7 @@ def test_p2p_msg_invitation_resp(dev, apdev):
     msg = p2p_hdr(dst, src, type=P2P_INVITATION_RESP, dialog_token=p2p['dialog_token'])
     attrs = p2p_attr_channel_list()
     msg['payload'] += ie_p2p(attrs)
-    mgmt_tx(dev[1], "MGMT_TX {} {} freq={} wait_time=50 no_cck=1 action={}".format(addr0, addr0, rx_msg['freq'], binascii.hexlify(msg['payload'])))
+    mgmt_tx(dev[1], "MGMT_TX {} {} freq={} wait_time=200 no_cck=1 action={}".format(addr0, addr0, rx_msg['freq'], binascii.hexlify(msg['payload'])))
 
     invite(dev[0], dev[1])
     rx_msg = dev[1].mgmt_rx()
@@ -912,7 +911,7 @@ def test_p2p_msg_invitation_resp(dev, apdev):
                          0x58, 0x58, 0x04,
                          81, 1, 15)
     msg['payload'] += ie_p2p(attrs)
-    mgmt_tx(dev[1], "MGMT_TX {} {} freq={} wait_time=50 no_cck=1 action={}".format(addr0, addr0, rx_msg['freq'], binascii.hexlify(msg['payload'])))
+    mgmt_tx(dev[1], "MGMT_TX {} {} freq={} wait_time=200 no_cck=1 action={}".format(addr0, addr0, rx_msg['freq'], binascii.hexlify(msg['payload'])))
 
     invite(dev[0], dev[1])
     rx_msg = dev[1].mgmt_rx()
@@ -931,7 +930,7 @@ def test_p2p_msg_invitation_resp(dev, apdev):
                          0x58, 0x58, 0x04,
                          81, 1, 12)
     msg['payload'] += ie_p2p(attrs)
-    mgmt_tx(dev[1], "MGMT_TX {} {} freq={} wait_time=50 no_cck=1 action={}".format(addr0, addr0, rx_msg['freq'], binascii.hexlify(msg['payload'])))
+    mgmt_tx(dev[1], "MGMT_TX {} {} freq={} wait_time=200 no_cck=1 action={}".format(addr0, addr0, rx_msg['freq'], binascii.hexlify(msg['payload'])))
 
     invite(dev[0], dev[1])
     rx_msg = dev[1].mgmt_rx()
@@ -947,11 +946,133 @@ def test_p2p_msg_invitation_resp(dev, apdev):
     msg = p2p_hdr(dst, src, type=P2P_INVITATION_RESP, dialog_token=p2p['dialog_token'])
     attrs = p2p_attr_status()
     msg['payload'] += ie_p2p(attrs)
-    mgmt_tx(dev[1], "MGMT_TX {} {} freq={} wait_time=50 no_cck=1 action={}".format(addr0, addr0, rx_msg['freq'], binascii.hexlify(msg['payload'])))
+    mgmt_tx(dev[1], "MGMT_TX {} {} freq={} wait_time=200 no_cck=1 action={}".format(addr0, addr0, rx_msg['freq'], binascii.hexlify(msg['payload'])))
 
     ev = dev[0].wait_global_event(["P2P-GROUP-STARTED"], timeout=15);
     if ev is None:
         raise Exception("Group was not started")
+
+def test_p2p_msg_invitation_resend(dev, apdev):
+    """P2P protocol tests for invitation resending on no-common-channels"""
+    form(dev[0], dev[1])
+    dev[0].dump_monitor()
+    dev[1].dump_monitor()
+    addr0 = dev[0].p2p_dev_addr()
+    addr1 = dev[1].p2p_dev_addr()
+
+    if "FAIL" in dev[1].request("SET ext_mgmt_frame_handling 1"):
+        raise Exception("Failed to enable external management frame handling")
+
+    logger.info("Forced channel in invitation")
+    invite(dev[0], dev[1], extra="freq=2422")
+    rx_msg = dev[1].mgmt_rx()
+    if rx_msg is None:
+        raise Exception("MGMT-RX timeout")
+    p2p = parse_p2p_public_action(rx_msg['payload'])
+    if p2p is None:
+        raise Exception("Not a P2P Public Action frame " + str(dialog_token))
+    if p2p['subtype'] != P2P_INVITATION_REQ:
+        raise Exception("Unexpected subtype %d" % p2p['subtype'])
+    msg = p2p_hdr(addr0, addr1, type=P2P_INVITATION_RESP,
+                  dialog_token=p2p['dialog_token'])
+    attrs = p2p_attr_status(status=P2P_SC_FAIL_NO_COMMON_CHANNELS)
+    msg['payload'] += ie_p2p(attrs)
+    mgmt_tx(dev[1], "MGMT_TX {} {} freq={} wait_time=200 no_cck=1 action={}".format(addr0, addr0, rx_msg['freq'], binascii.hexlify(msg['payload'])))
+    ev = dev[0].wait_global_event(["P2P-INVITATION-RESULT"], timeout=15)
+    if ev is None:
+        raise Exception("Timeout on invitation result");
+    if "status=7" not in ev:
+        raise Exception("Unexpected invitation result: " + ev)
+
+    logger.info("Any channel allowed, only preference provided in invitation");
+    invite(dev[0], dev[1], extra="pref=2422")
+    rx_msg = dev[1].mgmt_rx()
+    if rx_msg is None:
+        raise Exception("MGMT-RX timeout")
+    p2p = parse_p2p_public_action(rx_msg['payload'])
+    if p2p is None:
+        raise Exception("Not a P2P Public Action frame " + str(dialog_token))
+    if p2p['subtype'] != P2P_INVITATION_REQ:
+        raise Exception("Unexpected subtype %d" % p2p['subtype'])
+    msg = p2p_hdr(addr0, addr1, type=P2P_INVITATION_RESP,
+                  dialog_token=p2p['dialog_token'])
+    attrs = p2p_attr_status(status=P2P_SC_FAIL_NO_COMMON_CHANNELS)
+    msg['payload'] += ie_p2p(attrs)
+    if "FAIL" in dev[1].request("SET ext_mgmt_frame_handling 0"):
+        raise Exception("Failed to disable external management frame handling")
+    mgmt_tx(dev[1], "MGMT_TX {} {} freq={} wait_time=200 no_cck=1 action={}".format(addr0, addr0, rx_msg['freq'], binascii.hexlify(msg['payload'])))
+    ev = dev[0].wait_global_event(["P2P-INVITATION-RESULT"], timeout=15)
+    if ev is None:
+        raise Exception("Timeout on invitation result");
+    if "status=0" not in ev:
+        raise Exception("Unexpected invitation result: " + ev)
+
+    ev = dev[0].wait_global_event(["P2P-GROUP-STARTED"], timeout=15);
+    if ev is None:
+        raise Exception("Group was not started on dev0")
+    ev = dev[1].wait_global_event(["P2P-GROUP-STARTED"], timeout=15);
+    if ev is None:
+        raise Exception("Group was not started on dev1")
+
+def test_p2p_msg_invitation_resend_duplicate(dev, apdev):
+    """P2P protocol tests for invitation resending on no-common-channels and duplicated response"""
+    form(dev[0], dev[1])
+    dev[0].dump_monitor()
+    dev[1].dump_monitor()
+    addr0 = dev[0].p2p_dev_addr()
+    addr1 = dev[1].p2p_dev_addr()
+
+    if "FAIL" in dev[1].request("SET ext_mgmt_frame_handling 1"):
+        raise Exception("Failed to enable external management frame handling")
+
+    logger.info("Any channel allowed, only preference provided in invitation");
+    invite(dev[0], dev[1], extra="pref=2422")
+    rx_msg = dev[1].mgmt_rx()
+    if rx_msg is None:
+        raise Exception("MGMT-RX timeout")
+    p2p = parse_p2p_public_action(rx_msg['payload'])
+    if p2p is None:
+        raise Exception("Not a P2P Public Action frame " + str(dialog_token))
+    if p2p['subtype'] != P2P_INVITATION_REQ:
+        raise Exception("Unexpected subtype %d" % p2p['subtype'])
+    msg = p2p_hdr(addr0, addr1, type=P2P_INVITATION_RESP,
+                  dialog_token=p2p['dialog_token'])
+    attrs = p2p_attr_status(status=P2P_SC_FAIL_NO_COMMON_CHANNELS)
+    msg['payload'] += ie_p2p(attrs)
+    mgmt_tx(dev[1], "MGMT_TX {} {} freq={} wait_time=200 no_cck=1 action={}".format(addr0, addr0, rx_msg['freq'], binascii.hexlify(msg['payload'])))
+
+    rx_msg = dev[1].mgmt_rx()
+    if rx_msg is None:
+        raise Exception("MGMT-RX timeout")
+    p2p = parse_p2p_public_action(rx_msg['payload'])
+    if p2p is None:
+        raise Exception("Not a P2P Public Action frame " + str(dialog_token))
+    if p2p['subtype'] != P2P_INVITATION_REQ:
+        raise Exception("Unexpected subtype %d" % p2p['subtype'])
+
+    logger.info("Retransmit duplicate of previous response")
+    mgmt_tx(dev[1], "MGMT_TX {} {} freq={} wait_time=200 no_cck=1 action={}".format(addr0, addr0, rx_msg['freq'], binascii.hexlify(msg['payload'])))
+
+    logger.info("Transmit real response")
+    msg = p2p_hdr(addr0, addr1, type=P2P_INVITATION_RESP,
+                  dialog_token=p2p['dialog_token'])
+    attrs = p2p_attr_status(status=P2P_SC_SUCCESS)
+    attrs += p2p_attr_channel_list()
+    msg['payload'] += ie_p2p(attrs)
+    if "FAIL" in dev[1].request("MGMT_TX {} {} freq={} wait_time=200 no_cck=1 action={}".format(addr0, addr0, rx_msg['freq'], binascii.hexlify(msg['payload']))):
+        raise Exception("Failed to transmit real response")
+    dev[1].request("SET ext_mgmt_frame_handling 0")
+
+    ev = dev[0].wait_global_event(["P2P-INVITATION-RESULT"], timeout=10)
+    if ev is None:
+        raise Exception("Timeout on invitation result");
+    if "status=0" not in ev:
+        raise Exception("Unexpected invitation result: " + ev)
+    ev = dev[0].wait_global_event(["P2P-GROUP-STARTED"], timeout=10)
+    if ev is None:
+        raise Exception("Group formation timed out")
+    dev[0].group_form_result(ev)
+    dev[0].remove_group()
 
 def test_p2p_msg_pd_req(dev, apdev):
     """P2P protocol tests for provision discovery request processing"""

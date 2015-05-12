@@ -13,7 +13,7 @@ import Queue
 import hwsim_utils
 import utils
 from test_p2p_autogo import connect_cli
-from test_p2p_persistent import form, invite_from_cli, invite_from_go
+from test_p2p_persistent import form, invite, invite_from_cli, invite_from_go
 
 def test_wifi_display(dev):
     """Wi-Fi Display extensions to P2P"""
@@ -44,6 +44,10 @@ def test_wifi_display(dev):
     audio = "000f" + "010203040506070809101112131415"
     dev[0].request("WFD_SUBELEM_SET 2 " + audio)
 
+    elems = dev[0].request("WFD_SUBELEM_GET all")
+    if wfd_devinfo not in elems:
+        raise Exception("Could not fetch back configured subelements")
+
     wfd_devinfo2 = "00001c440028"
     dev[1].request("SET wifi_display 1")
     dev[1].request("WFD_SUBELEM_SET 0 0006" + wfd_devinfo2)
@@ -62,6 +66,8 @@ def test_wifi_display(dev):
         raise Exception("Device discovery timed out")
     if "wfd_dev_info=0x" + wfd_devinfo not in ev:
         raise Exception("Wi-Fi Display Info not in P2P-DEVICE-FOUND event")
+    if "new=1" not in ev:
+        raise Exception("new=1 flag missing from P2P-DEVICE-FOUND event")
     ev = dev[1].wait_global_event(["P2P-SERV-DISC-RESP"], timeout=5)
     if ev is None:
         raise Exception("Service discovery timed out")
@@ -73,6 +79,25 @@ def test_wifi_display(dev):
         raise Exception("WFD 3D Video Formats missing from WSD response")
     if audio not in ev:
         raise Exception("WFD Audio Formats missing from WSD response")
+
+    dev[1].dump_monitor()
+    dev[0].request("WFD_SUBELEM_SET 0 0006" + wfd_devinfo2)
+    ev = dev[1].wait_global_event(["P2P-DEVICE-FOUND"], timeout=15)
+    if ev is None:
+        raise Exception("Peer info update timed out")
+    if "new=0" not in ev:
+        raise Exception("new=0 flag missing from P2P-DEVICE-FOUND event")
+    if "wfd_dev_info=0x" + wfd_devinfo2 not in ev:
+        raise Exception("Wi-Fi Display Info not in P2P-DEVICE-FOUND event")
+    dev[1].dump_monitor()
+    dev[0].request("WFD_SUBELEM_SET 0 0006" + wfd_devinfo)
+    ev = dev[1].wait_global_event(["P2P-DEVICE-FOUND"], timeout=15)
+    if ev is None:
+        raise Exception("Peer info update timed out")
+    if "new=0" not in ev:
+        raise Exception("new=0 flag missing from P2P-DEVICE-FOUND event")
+    if "wfd_dev_info=0x" + wfd_devinfo not in ev:
+        raise Exception("Wi-Fi Display Info not in P2P-DEVICE-FOUND event")
 
     pin = dev[0].wps_read_pin()
     dev[0].p2p_go_neg_auth(dev[1].p2p_dev_addr(), pin, 'display')
@@ -146,6 +171,33 @@ def test_wifi_display(dev):
     if dev[0].request("WFD_SUBELEM_GET 1") != "0006020304050608":
         raise Exception("Unexpected WFD_SUBELEM_GET 1 value (per-interface)")
 
+    elems = dev[0].request("WFD_SUBELEM_GET all")
+    if "OK" not in dev[0].request("WFD_SUBELEM_SET all " + elems):
+        raise Exception("WFD_SUBELEM_SET all failed")
+    if dev[0].request("WFD_SUBELEM_GET all") != elems:
+        raise Exception("Mismatch in WFS_SUBELEM_SET/GET all")
+    test = "00000600411c440028"
+    if "OK" not in dev[0].request("WFD_SUBELEM_SET all " + test):
+        raise Exception("WFD_SUBELEM_SET all failed")
+    if dev[0].request("WFD_SUBELEM_GET all") != test:
+        raise Exception("Mismatch in WFS_SUBELEM_SET/GET all")
+
+    if "FAIL" not in dev[0].request("WFD_SUBELEM_SET all qwerty"):
+        raise Exception("Invalid WFD_SUBELEM_SET all succeeded")
+    if "FAIL" not in dev[0].request("WFD_SUBELEM_SET all 11"):
+        raise Exception("Invalid WFD_SUBELEM_SET all succeeded")
+    dev[0].request("WFD_SUBELEM_SET all 112233445566")
+    dev[0].request("WFD_SUBELEM_SET all ff0000fe0000fd00")
+
+    if "FAIL" not in dev[0].request("WFD_SUBELEM_SET 300 112233"):
+        raise Exception("Invalid WFD_SUBELEM_SET 300 succeeded")
+    if "FAIL" not in dev[0].request("WFD_SUBELEM_SET -1 112233"):
+        raise Exception("Invalid WFD_SUBELEM_SET -1 succeeded")
+    if "FAIL" not in dev[0].request("WFD_SUBELEM_GET 300"):
+        raise Exception("Invalid WFD_SUBELEM_GET 300 succeeded")
+    if "FAIL" not in dev[0].request("WFD_SUBELEM_GET -1"):
+        raise Exception("Invalid WFD_SUBELEM_GET -1 succeeded")
+
     dev[0].request("SET wifi_display 0")
     dev[1].request("SET wifi_display 0")
     dev[2].request("SET wifi_display 0")
@@ -179,7 +231,7 @@ def test_wifi_display_go_invite(dev):
         dev[0].p2p_start_go(freq=2412)
 
         # Add test client to the group
-        connect_cli(dev[0], dev[2])
+        connect_cli(dev[0], dev[2], social=True, freq=2412)
 
         logger.info("Invite peer to join the group")
         dev[0].p2p_go_authorize_client(pin)
@@ -221,11 +273,41 @@ def test_wifi_display_persistent_group(dev):
         if "[P2P-PERSISTENT]" not in networks[0]['flags']:
             raise Exception("Not the persistent group data")
         if "OK" not in dev[0].global_request("P2P_GROUP_ADD persistent=" + networks[0]['id'] + " freq=" + listen_freq):
-            raise Exception("Could not state GO")
-        connect_cli(dev[0], dev[2])
-        invite_from_cli(dev[0], dev[1])
+            raise Exception("Could not start GO")
+        connect_cli(dev[0], dev[2], social=True, freq=listen_freq)
+        dev[0].dump_monitor()
+        dev[1].dump_monitor()
+        invite(dev[1], dev[0])
+        ev = dev[1].wait_global_event(["P2P-GROUP-STARTED"], timeout=30)
+        if ev is None:
+            raise Exception("Timeout on group re-invocation (on client)")
+        ev = dev[0].wait_global_event(["P2P-GROUP-STARTED"], timeout=0.1)
+        if ev is not None:
+            raise Exception("Unexpected P2P-GROUP-START on GO")
+        hwsim_utils.test_connectivity_p2p(dev[0], dev[1])
 
     finally:
         dev[0].request("SET wifi_display 0")
         dev[1].request("SET wifi_display 0")
         dev[2].request("SET wifi_display 0")
+
+def test_wifi_display_invalid_subelem(dev):
+    """Wi-Fi Display and invalid subelement parsing"""
+    addr1 = dev[1].p2p_dev_addr()
+
+    try:
+        enable_wifi_display(dev[0])
+        enable_wifi_display(dev[1])
+        dev[1].request("WFD_SUBELEM_SET 0 ffff00411c440028")
+
+        dev[1].p2p_listen()
+        dev[0].p2p_find(social=True)
+        ev = dev[0].wait_global_event(["P2P-DEVICE-FOUND"], timeout=10)
+        if ev is None:
+            raise Exception("Device discovery timed out")
+        if "wfd_dev_info=" in ev:
+            raise Exception("Invalid WFD subelement was shown")
+
+    finally:
+        dev[0].request("SET wifi_display 0")
+        dev[1].request("SET wifi_display 0")

@@ -233,6 +233,28 @@ static struct radius_attr_type radius_attrs[] =
 	{ RADIUS_ATTR_NAS_IPV6_ADDRESS, "NAS-IPv6-Address", RADIUS_ATTR_IPV6 },
 	{ RADIUS_ATTR_ERROR_CAUSE, "Error-Cause", RADIUS_ATTR_INT32 },
 	{ RADIUS_ATTR_EAP_KEY_NAME, "EAP-Key-Name", RADIUS_ATTR_HEXDUMP },
+	{ RADIUS_ATTR_OPERATOR_NAME, "Operator-Name", RADIUS_ATTR_TEXT },
+	{ RADIUS_ATTR_LOCATION_INFO, "Location-Information",
+	  RADIUS_ATTR_HEXDUMP },
+	{ RADIUS_ATTR_LOCATION_DATA, "Location-Data", RADIUS_ATTR_HEXDUMP },
+	{ RADIUS_ATTR_BASIC_LOCATION_POLICY_RULES,
+	  "Basic-Location-Policy-Rules", RADIUS_ATTR_HEXDUMP },
+	{ RADIUS_ATTR_EXTENDED_LOCATION_POLICY_RULES,
+	  "Extended-Location-Policy-Rules", RADIUS_ATTR_HEXDUMP },
+	{ RADIUS_ATTR_LOCATION_CAPABLE, "Location-Capable", RADIUS_ATTR_INT32 },
+	{ RADIUS_ATTR_REQUESTED_LOCATION_INFO, "Requested-Location-Info",
+	  RADIUS_ATTR_INT32 },
+	{ RADIUS_ATTR_MOBILITY_DOMAIN_ID, "Mobility-Domain-Id",
+	  RADIUS_ATTR_INT32 },
+	{ RADIUS_ATTR_WLAN_HESSID, "WLAN-HESSID", RADIUS_ATTR_TEXT },
+	{ RADIUS_ATTR_WLAN_PAIRWISE_CIPHER, "WLAN-Pairwise-Cipher",
+	  RADIUS_ATTR_HEXDUMP },
+	{ RADIUS_ATTR_WLAN_GROUP_CIPHER, "WLAN-Group-Cipher",
+	  RADIUS_ATTR_HEXDUMP },
+	{ RADIUS_ATTR_WLAN_AKM_SUITE, "WLAN-AKM-Suite",
+	  RADIUS_ATTR_HEXDUMP },
+	{ RADIUS_ATTR_WLAN_GROUP_MGMT_CIPHER, "WLAN-Group-Mgmt-Pairwise-Cipher",
+	  RADIUS_ATTR_HEXDUMP },
 };
 #define RADIUS_ATTRS ARRAY_SIZE(radius_attrs)
 
@@ -508,7 +530,7 @@ int radius_msg_verify_acct_req(struct radius_msg *msg, const u8 *secret,
 	addr[3] = secret;
 	len[3] = secret_len;
 	md5_vector(4, addr, len, hash);
-	return os_memcmp(msg->hdr->authenticator, hash, MD5_MAC_LEN) != 0;
+	return os_memcmp_const(msg->hdr->authenticator, hash, MD5_MAC_LEN) != 0;
 }
 
 
@@ -535,7 +557,7 @@ int radius_msg_verify_das_req(struct radius_msg *msg, const u8 *secret,
 	addr[3] = secret;
 	len[3] = secret_len;
 	md5_vector(4, addr, len, hash);
-	if (os_memcmp(msg->hdr->authenticator, hash, MD5_MAC_LEN) != 0)
+	if (os_memcmp_const(msg->hdr->authenticator, hash, MD5_MAC_LEN) != 0)
 		return 1;
 
 	for (i = 0; i < msg->attr_used; i++) {
@@ -568,7 +590,7 @@ int radius_msg_verify_das_req(struct radius_msg *msg, const u8 *secret,
 	os_memcpy(msg->hdr->authenticator, orig_authenticator,
 		  sizeof(orig_authenticator));
 
-	return os_memcmp(orig, auth, MD5_MAC_LEN) != 0;
+	return os_memcmp_const(orig, auth, MD5_MAC_LEN) != 0;
 }
 
 
@@ -801,7 +823,7 @@ int radius_msg_verify_msg_auth(struct radius_msg *msg, const u8 *secret,
 			  sizeof(orig_authenticator));
 	}
 
-	if (os_memcmp(orig, auth, MD5_MAC_LEN) != 0) {
+	if (os_memcmp_const(orig, auth, MD5_MAC_LEN) != 0) {
 		wpa_printf(MSG_INFO, "Invalid Message-Authenticator!");
 		return 1;
 	}
@@ -838,7 +860,7 @@ int radius_msg_verify(struct radius_msg *msg, const u8 *secret,
 	addr[3] = secret;
 	len[3] = secret_len;
 	md5_vector(4, addr, len, hash);
-	if (os_memcmp(hash, msg->hdr->authenticator, MD5_MAC_LEN) != 0) {
+	if (os_memcmp_const(hash, msg->hdr->authenticator, MD5_MAC_LEN) != 0) {
 		wpa_printf(MSG_INFO, "Response Authenticator invalid!");
 		return 1;
 	}
@@ -934,7 +956,6 @@ static u8 *radius_msg_get_vendor_attr(struct radius_msg *msg, u32 vendor,
 			vhdr = (struct radius_attr_vendor *) pos;
 			if (vhdr->vendor_length > left ||
 			    vhdr->vendor_length < sizeof(*vhdr)) {
-				left = 0;
 				break;
 			}
 			if (vhdr->vendor_type != subtype) {
@@ -972,13 +993,16 @@ static u8 * decrypt_ms_key(const u8 *key, size_t len,
 
 	/* key: 16-bit salt followed by encrypted key info */
 
-	if (len < 2 + 16)
+	if (len < 2 + 16) {
+		wpa_printf(MSG_DEBUG, "RADIUS: %s: Len is too small: %d",
+			   __func__, (int) len);
 		return NULL;
+	}
 
 	pos = key + 2;
 	left = len - 2;
 	if (left % 16) {
-		wpa_printf(MSG_INFO, "Invalid ms key len %lu",
+		wpa_printf(MSG_INFO, "RADIUS: Invalid ms key len %lu",
 			   (unsigned long) left);
 		return NULL;
 	}
@@ -1013,7 +1037,7 @@ static u8 * decrypt_ms_key(const u8 *key, size_t len,
 	}
 
 	if (plain[0] == 0 || plain[0] > plen - 1) {
-		wpa_printf(MSG_INFO, "Failed to decrypt MPPE key");
+		wpa_printf(MSG_INFO, "RADIUS: Failed to decrypt MPPE key");
 		os_free(plain);
 		return NULL;
 	}
@@ -1102,6 +1126,10 @@ radius_msg_get_ms_keys(struct radius_msg *msg, struct radius_msg *sent_msg,
 					    sent_msg->hdr->authenticator,
 					    secret, secret_len,
 					    &keys->send_len);
+		if (!keys->send) {
+			wpa_printf(MSG_DEBUG,
+				   "RADIUS: Failed to decrypt send key");
+		}
 		os_free(key);
 	}
 
@@ -1113,6 +1141,10 @@ radius_msg_get_ms_keys(struct radius_msg *msg, struct radius_msg *sent_msg,
 					    sent_msg->hdr->authenticator,
 					    secret, secret_len,
 					    &keys->recv_len);
+		if (!keys->recv) {
+			wpa_printf(MSG_DEBUG,
+				   "RADIUS: Failed to decrypt recv key");
+		}
 		os_free(key);
 	}
 
