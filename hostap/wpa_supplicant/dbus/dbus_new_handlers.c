@@ -1336,6 +1336,7 @@ DBusMessage * wpas_dbus_handler_scan(DBusMessage *message,
 			}
 
 			if (params.freqs && params.freqs[0]) {
+				wpa_s->last_scan_req = MANUAL_SCAN_REQ;
 				if (wpa_supplicant_trigger_scan(wpa_s,
 								&params)) {
 					reply = wpas_dbus_error_scan_error(
@@ -1362,6 +1363,7 @@ DBusMessage * wpas_dbus_handler_scan(DBusMessage *message,
 			wpa_supplicant_cancel_sched_scan(wpa_s);
 		}
 
+		wpa_s->last_scan_req = MANUAL_SCAN_REQ;
 		if (wpa_supplicant_trigger_scan(wpa_s, &params)) {
 			reply = wpas_dbus_error_scan_error(
 				message, "Scan request rejected");
